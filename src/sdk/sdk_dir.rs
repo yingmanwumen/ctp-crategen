@@ -45,6 +45,9 @@ impl SdkDir {
         Ok(Self { dir, headers })
     }
 
+    /// Returns the decoded contents of a required header by its file name.
+    ///
+    /// Returns `None` when `header` is not one of the required SDK headers.
     pub fn get_header(&self, header: &'static str) -> Option<&String> {
         self.headers.get(header)
     }
