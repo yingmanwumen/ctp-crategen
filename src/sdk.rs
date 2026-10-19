@@ -18,7 +18,7 @@ const LIBS: [&str; 2] = ["thosttraderapi_se.so", "thostmduserapi_se.so"];
 
 #[derive(Debug, Clone)]
 /// An SDK located at a validated directory.
-pub struct SdkDir {
+pub struct Sdk {
     dir: DirBuf,
     /// Header file name to UTF-8 contents.
     headers: HashMap<&'static str, String>,
@@ -37,7 +37,7 @@ pub enum VerifyError {
     Encoding(PathBuf),
 }
 
-impl SdkDir {
+impl Sdk {
     /// Creates an SDK from a directory path.
     pub fn new(dir: &str) -> anyhow::Result<Self> {
         let dir = DirBuf::try_from(dir)?;
@@ -98,7 +98,7 @@ impl SdkDir {
     }
 }
 
-impl AsRef<Path> for SdkDir {
+impl AsRef<Path> for Sdk {
     fn as_ref(&self) -> &Path {
         self.dir.as_ref()
     }

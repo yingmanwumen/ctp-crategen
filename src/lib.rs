@@ -1,4 +1,4 @@
 pub mod codegen;
-pub mod sdk_dir;
+pub mod sdk;
 
 mod misc;

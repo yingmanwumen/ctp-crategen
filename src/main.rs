@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use ctp_crategen::sdk_dir::SdkDir;
+use ctp_crategen::{codegen::Codegen, sdk::Sdk};
 
 #[derive(Debug, Parser)]
 #[command(about = "Generate CTP crates")]
@@ -17,17 +17,16 @@ enum Command {
 #[derive(Debug, Args)]
 struct GenerateArgs {
     /// SDK directory to process.
-    #[arg(value_name = "SDK-DIR", value_parser = SdkDir::new)]
-    sdk_dir: SdkDir,
+    #[arg(value_name = "SDK-DIR", value_parser = Sdk::new)]
+    sdk_dir: Sdk,
 }
 
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Command::Generate(_args) => {
-            // SDK validation is performed by the clap value parser before this branch.
-            // The actual crate generation pipeline will be wired in here.
-            todo!()
+        Command::Generate(args) => {
+            let codegen = Codegen {};
+            codegen.generate(&args.sdk_dir).unwrap();
         }
     }
 }
