@@ -4,9 +4,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::misc::dir::DirBuf;
-use crate::sdk::{HEADERS, LIBS};
 use encoding_rs::{GBK, UTF_8};
 use thiserror::Error;
+
+const HEADERS: [&str; 4] = [
+    "ThostFtdcTraderApi.h",
+    "ThostFtdcMdApi.h",
+    "ThostFtdcUserApiStruct.h",
+    "ThostFtdcUserApiDataType.h",
+];
+
+const LIBS: [&str; 2] = ["thosttraderapi_se.so", "thostmduserapi_se.so"];
 
 #[derive(Debug, Clone)]
 /// An SDK located at a validated directory.

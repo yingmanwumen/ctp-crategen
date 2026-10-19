@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use ctp_crategen::sdk::sdk_dir::SdkDir;
+use ctp_crategen::sdk_dir::SdkDir;
 
 #[derive(Debug, Parser)]
 #[command(about = "Generate CTP crates")]
