@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    ops::{Deref, DerefMut},
+    path::{Path, PathBuf},
+};
 
 use anyhow::anyhow;
 
@@ -6,6 +9,10 @@ use anyhow::anyhow;
 pub struct DirBuf(PathBuf);
 
 impl DirBuf {
+    pub fn new(path: &str) -> anyhow::Result<Self> {
+        Self::try_from(path)
+    }
+
     fn parse_directory(value: &str) -> anyhow::Result<PathBuf> {
         let path = PathBuf::from(value);
         if path.is_dir() {
@@ -19,6 +26,19 @@ impl DirBuf {
 impl AsRef<Path> for DirBuf {
     fn as_ref(&self) -> &Path {
         &self.0
+    }
+}
+
+impl Deref for DirBuf {
+    type Target = Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for DirBuf {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

@@ -16,10 +16,10 @@ pub const HEADERS: [&str; 4] = [
 
 pub const LIBS: [&str; 2] = ["thosttraderapi_se.so", "thostmduserapi_se.so"];
 
-pub const CLASSES: [&str; 4] = [
-    "CThostFtdcTraderSpi",
-    "CThostFtdcTraderApi",
-    "CThostFtdcMdSpi",
+pub const CLASSES: [&str; 1] = [
+    // "CThostFtdcTraderSpi",
+    // "CThostFtdcTraderApi",
+    // "CThostFtdcMdSpi",
     "CThostFtdcMdApi",
 ];
 

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand};
 use ctp_crategen::{codegen::Codegen, sdk::Sdk};
 
@@ -16,16 +18,18 @@ enum Command {
 
 #[derive(Debug, Args)]
 struct GenerateArgs {
-    /// SDK directory to process.
     #[arg(value_name = "SDK-DIR", value_parser = Sdk::new)]
     sdk_dir: Sdk,
+
+    #[arg(short, long, value_name = "OUTPUT-DIR")]
+    output_dir: PathBuf,
 }
 
 fn main() {
     let cli = Cli::parse();
     match cli.command {
         Command::Generate(args) => {
-            let codegen = Codegen {};
+            let codegen = Codegen::new(args.output_dir);
             codegen.generate(&args.sdk_dir).unwrap();
         }
     }
