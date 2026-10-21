@@ -65,6 +65,7 @@ impl Codegen {
 #pragma once
 
 #include <stdbool.h>
+#include <new>
 
 #include "ThostFtdcUserApiStruct.h"
 #include "ThostFtdcUserApiDataType.h"

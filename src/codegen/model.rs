@@ -27,6 +27,141 @@ pub struct Param {
 
 impl Class {
     pub fn codegen(&self) -> (String, String) {
+        if self.name.contains("Api") {
+            self.api_codegen()
+        } else {
+            self.spi_codegen()
+        }
+    }
+
+    fn callback_table_codegen(&self) -> (String, String) {
+        let mut callback_table = String::new();
+        for method in &self.methods {
+            let params = [
+                vec![String::from("void *userdata")],
+                method.params.iter().map(|param| param.codegen()).collect(),
+            ]
+            .concat()
+            .join(", ");
+            callback_table += &format!("void (*{})({});\n", method.name.to_snake_case(), params);
+        }
+        let callback_table_name = format!("{}Callbacks", self.name);
+        let hpp = format!(
+            r#"
+typedef struct {callback_table_name} {{
+{callback_table}
+}} {callback_table_name};
+"#
+        );
+        (hpp, Default::default())
+    }
+
+    fn impl_class_codegen(&self) -> (String, String) {
+        let callback_table_name = format!("{}Callbacks", self.name);
+        let mut overrides = String::new();
+        for method in &self.methods {
+            let params = method
+                .params
+                .iter()
+                .map(|param| param.codegen())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let args = [
+                vec!["m_userdata"],
+                method
+                    .params
+                    .iter()
+                    .map(|param| param.name.as_ref())
+                    .collect::<Vec<_>>(),
+            ]
+            .concat()
+            .join(", ");
+            let callback_name = &method.name;
+            let c_callback_name = method.name.to_snake_case();
+            overrides += &format!(
+                r#"
+void {callback_name}({params}) override {{
+    if (m_callbacks.{c_callback_name}) {{
+        m_callbacks.{c_callback_name}({args});
+    }}
+}}
+"#
+            );
+        }
+
+        let impl_name = format!("{}Impl", self.name);
+        let class_name = &self.name;
+        let cpp = format!(
+            r#"
+class {impl_name} final: public {class_name} {{
+    {callback_table_name} m_callbacks;
+    void *m_userdata;
+public:
+    {impl_name}(const {callback_table_name}& callbacks, void *userdata): m_callbacks(callbacks), m_userdata(userdata) {{}}
+    {overrides}
+}};
+"#
+        );
+        (Default::default(), cpp)
+    }
+
+    fn impl_class_wrapper_codegen(&self) -> (String, String) {
+        let type_name = if self.name.contains("Md") {
+            "md"
+        } else {
+            "trader"
+        };
+        let create_wrapper_name = format!("create_{type_name}_spi");
+        let destroy_wrapper_name = format!("destroy_{type_name}_spi");
+        let callback_table_name = format!("{}Callbacks", self.name);
+        let impl_name = format!("{}Impl", self.name);
+        let class_name = &self.name;
+        let hpp = format!(
+            r#"
+void *{create_wrapper_name}(const {callback_table_name} *callbacks, void *userdata);
+void {destroy_wrapper_name}(void *spi_handle);
+"#
+        );
+        let cpp = format!(
+            r#"
+void *{create_wrapper_name}(const {callback_table_name} *callbacks, void *userdata) {{
+    if (!callbacks) {{
+        return nullptr;
+    }}
+    auto *object = new (std::nothrow) {impl_name}(*callbacks, userdata);
+    {class_name} *base = object;
+    return static_cast<void*>(base);
+}}
+
+void {destroy_wrapper_name}(void *spi_handle) {{
+    auto *base = static_cast<{class_name}*>(spi_handle);
+    auto *object = static_cast<{impl_name}*>(base);
+    delete object;
+}}
+"#
+        );
+        (hpp, cpp)
+    }
+
+    pub fn spi_codegen(&self) -> (String, String) {
+        let (mut hpp, mut cpp) = (String::new(), String::new());
+
+        let (callback_table_hpp, callback_table_cpp) = self.callback_table_codegen();
+        let (impl_class_hpp, impl_class_cpp) = self.impl_class_codegen();
+        let (impl_class_wrapper_hpp, impl_class_wrapper_cpp) = self.impl_class_wrapper_codegen();
+
+        hpp += &callback_table_hpp;
+        hpp += &impl_class_hpp;
+        hpp += &impl_class_wrapper_hpp;
+
+        cpp += &callback_table_cpp;
+        cpp += &impl_class_cpp;
+        cpp += &impl_class_wrapper_cpp;
+
+        (hpp, cpp)
+    }
+
+    pub fn api_codegen(&self) -> (String, String) {
         let (mut hpp, mut cpp) = (String::new(), String::new());
         for method in &self.methods {
             let (method_hpp, method_cpp) = method.codegen(&self.name);
