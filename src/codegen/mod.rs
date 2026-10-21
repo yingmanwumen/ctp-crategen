@@ -96,6 +96,7 @@ extern "C" {
 
     fn rust_bindgen(&self, sdk: &Sdk, wrapper_hpp: &str) -> anyhow::Result<Bindings> {
         Ok(bindgen::Builder::default()
+            .clang_args(["-x", "c++"])
             .header_contents(
                 "ThostFtdcUserApiStruct.h",
                 sdk.get_header("ThostFtdcUserApiStruct.h").unwrap(),
