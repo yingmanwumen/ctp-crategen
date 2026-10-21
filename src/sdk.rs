@@ -7,14 +7,21 @@ use crate::misc::dir::DirBuf;
 use encoding_rs::{GBK, UTF_8};
 use thiserror::Error;
 
-const HEADERS: [&str; 4] = [
+pub const HEADERS: [&str; 4] = [
     "ThostFtdcTraderApi.h",
     "ThostFtdcMdApi.h",
     "ThostFtdcUserApiStruct.h",
     "ThostFtdcUserApiDataType.h",
 ];
 
-const LIBS: [&str; 2] = ["thosttraderapi_se.so", "thostmduserapi_se.so"];
+pub const LIBS: [&str; 2] = ["thosttraderapi_se.so", "thostmduserapi_se.so"];
+
+pub const CLASSES: [&str; 4] = [
+    "CThostFtdcTraderSpi",
+    "CThostFtdcTraderApi",
+    "CThostFtdcMdSpi",
+    "CThostFtdcMdApi",
+];
 
 #[derive(Debug, Clone)]
 /// An SDK located at a validated directory.
@@ -56,7 +63,7 @@ impl Sdk {
     /// Returns the decoded contents of a required header by its file name.
     ///
     /// Returns `None` when `header` is not one of the required SDK headers.
-    pub fn get_header(&self, header: &'static str) -> Option<&String> {
+    pub fn get_header(&self, header: &str) -> Option<&String> {
         self.headers.get(header)
     }
 
