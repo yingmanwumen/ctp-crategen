@@ -29,19 +29,75 @@ impl Class {
     pub fn codegen(&self) -> (String, String) {
         let (mut hpp, mut cpp) = (String::new(), String::new());
         for method in &self.methods {
-            if method.is_static && method.name.contains("Create") {
-                let (method_hpp, method_cpp) = method.factory_codegen(&self.name);
-                hpp += &method_hpp;
-                cpp += &method_cpp;
-            }
+            let (method_hpp, method_cpp) = method.codegen(&self.name);
+            hpp += &method_hpp;
+            cpp += &method_cpp;
         }
         (hpp, cpp)
     }
 }
 
 impl Method {
-    pub fn factory_codegen(&self, class_name: &str) -> (String, String) {
+    pub fn codegen(&self, class_name: &str) -> (String, String) {
+        if self.is_static {
+            if self.name.contains("Create") {
+                self.factory_codegen(class_name)
+            } else {
+                // Common static method
+                self.static_method_codegen(class_name)
+            }
+        } else {
+            (Default::default(), Default::default())
+        }
+    }
+
+    fn static_method_codegen(&self, class_name: &str) -> (String, String) {
         assert!(self.is_static);
+
+        let c_method_name = format!(
+            "{}_{}",
+            class_name.to_snake_case(),
+            self.name.to_snake_case()
+        );
+        let params = self
+            .params
+            .iter()
+            .map(|param| param.codegen())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let args = self
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let method_name = &self.name;
+        let return_type = &self.return_type;
+        let doc = self.doc.as_deref().unwrap_or_default();
+
+        let hpp = format!(
+            r#"
+{doc}
+{return_type} {c_method_name}({params});
+"#
+        );
+
+        let cpp = format!(
+            r#"
+{doc}
+{return_type} {c_method_name}({params}) {{
+    return {class_name}::{method_name}({args});
+}}
+            "#
+        );
+
+        (hpp, cpp)
+    }
+
+    fn factory_codegen(&self, class_name: &str) -> (String, String) {
+        assert!(self.is_static);
+
         let factory_name = self.name.to_snake_case();
         let params = self
             .params

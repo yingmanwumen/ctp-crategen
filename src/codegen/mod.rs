@@ -13,7 +13,6 @@ use clang::{Clang, Index};
 
 use crate::{
     codegen::{model::Class, parser::Parser},
-    misc::dir::DirBuf,
     sdk::{CLASSES, Sdk},
 };
 
@@ -69,6 +68,10 @@ impl Codegen {
 
 #include "ThostFtdcUserApiStruct.h"
 #include "ThostFtdcUserApiDataType.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 "#,
         );
         let mut cpp = format!(
@@ -83,6 +86,11 @@ impl Codegen {
             hpp += &class_hpp;
             cpp += &class_cpp;
         }
+        hpp += r#"
+#ifdef __cplusplus
+}
+#endif
+"#;
         Ok((hpp, cpp))
     }
 
