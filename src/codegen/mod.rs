@@ -440,7 +440,7 @@ pub enum Error {
 "#;
 
 const REQUEST_BUILDERS_SUPPORT: &str = r#"//! Builders for bindgen request types. Hedge flags default to speculation; other fields default to zero.
-//! Text setters write UTF-8 bytes; use the public raw fields for other encodings.
+//! Text setters encode Rust UTF-8 strings as GBK bytes for the CTP protocol.
 
 use crate::sys;
 use std::ffi::c_char;
@@ -449,6 +449,8 @@ use std::ffi::c_char;
 pub enum FieldError {
     #[error("{field} contains an interior NUL byte")]
     InteriorNul { field: &'static str },
+    #[error("{field} contains characters that cannot be encoded as GBK")]
+    Unrepresentable { field: &'static str },
     #[error("{field} is {length} bytes long, but its capacity is {capacity} bytes")]
     TooLong { field: &'static str, length: usize, capacity: usize },
 }
@@ -457,11 +459,15 @@ fn write_text<const N: usize>(target: &mut [c_char; N], value: &str, field: &'st
     if value.as_bytes().contains(&0) {
         return Err(FieldError::InteriorNul { field });
     }
-    if N == 0 || value.len() >= N {
-        return Err(FieldError::TooLong { field, length: value.len(), capacity: N.saturating_sub(1) });
+    let (encoded, _, had_errors) = encoding_rs::GBK.encode(value);
+    if had_errors {
+        return Err(FieldError::Unrepresentable { field });
+    }
+    if N == 0 || encoded.len() >= N {
+        return Err(FieldError::TooLong { field, length: encoded.len(), capacity: N.saturating_sub(1) });
     }
     target.fill(0);
-    for (target, byte) in target.iter_mut().zip(value.bytes()) {
+    for (target, byte) in target.iter_mut().zip(encoded.iter().copied()) {
         *target = byte as c_char;
     }
     Ok(())

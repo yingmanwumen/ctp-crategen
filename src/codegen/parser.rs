@@ -384,6 +384,11 @@ fn request_field_type(ty: Type<'_>) -> anyhow::Result<String> {
             || name.starts_with("CThostFtdc")
             || name.starts_with("THOST_"))
     {
+        // High-level builders expose C `int` typedefs as Rust i32. The
+        // bindgen `sys` module still retains the platform C type.
+        if ty.get_canonical_type().get_kind() == TypeKind::Int {
+            return Ok(String::from("i32"));
+        }
         return Ok(format!("sys::{name}"));
     }
     let canonical = ty.get_canonical_type();

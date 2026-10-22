@@ -34,7 +34,7 @@ impl RequestStruct {
             let ty = &field.rust_type;
             let mut doc = field.doc.clone().unwrap_or_default();
             match field.kind {
-                RequestFieldKind::Text => doc.push_str("\n    /// Writes UTF-8 bytes with a trailing NUL. Interior NUL and capacity errors are returned by `build()`."),
+                RequestFieldKind::Text => doc.push_str("\n    /// Encodes the Rust string as GBK bytes with a trailing NUL. Interior NUL, encoding, and capacity errors are returned by `build()`."),
                 RequestFieldKind::CharacterCode => doc.push_str("\n    /// Accepts a bindgen character constant (`u8`) and stores its byte in `c_char`."),
                 RequestFieldKind::CharacterCodeArray => doc.push_str("\n    /// Sets the first flag and clears the remaining SDK array slots."),
                 RequestFieldKind::Bytes => {
@@ -107,7 +107,7 @@ impl sys::{raw} {{
 /// Builds the original bindgen struct, without validating CTP business rules.
 /// Unset fields are zero-initialized except hedge flags, which default to speculation.
 /// `build()` reports the first field conversion error,
-/// even if the same field is subsequently set again. Use raw fields for non-UTF-8 text.
+/// even if the same field is subsequently set again. Text setters encode as GBK.
 pub struct {builder} {{
     raw: sys::{raw},
     error: Option<FieldError>,
