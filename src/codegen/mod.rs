@@ -1,5 +1,6 @@
 //! Code generation pipeline for converting validated CTP SDK data into crates.
 
+mod example;
 mod model;
 mod parser;
 
@@ -80,6 +81,13 @@ impl Codegen {
             builders += &request.rust_codegen();
         }
         Self::write_file(self.output_dir.join("src").join("requests.rs"), &builders)?;
+        Self::write_file(
+            self.output_dir.join("examples").join("basic.rs"),
+            &self.basic_example_codegen(
+                &classes,
+                errors.as_ref().is_some_and(|errors| !errors.is_empty()),
+            )?,
+        )?;
 
         Ok(())
     }
@@ -163,6 +171,7 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+encoding_rs = "0.8"
 thiserror = "2"
 "#,
             self.crate_name
@@ -348,6 +357,49 @@ fn c_string(value: &str) -> Result<Vec<c_char>, Error> {
 
 "#,
         );
+        rust += r#"
+/// Decode a CTP character buffer. Human-readable Chinese fields use GBK-compatible bytes.
+pub fn decode_ctp_text(value: &[c_char]) -> String {
+    let bytes = value
+        .iter()
+        .take_while(|&&byte| byte != 0)
+        .map(|&byte| byte as u8)
+        .collect::<Vec<_>>();
+    decode_ctp_bytes(&bytes)
+}
+
+/// Decode strict UTF-8 first and GBK second. Malformed callback data uses
+/// replacement characters as the final fallback because SPI callbacks cannot
+/// return a decoding error.
+pub fn decode_ctp_bytes(bytes: &[u8]) -> String {
+    use encoding_rs::{GBK, UTF_8};
+
+    if let Some(text) = UTF_8.decode_without_bom_handling_and_without_replacement(bytes) {
+        return text.into_owned();
+    }
+    if let Some(text) = GBK.decode_without_bom_handling_and_without_replacement(bytes) {
+        return text.into_owned();
+    }
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+impl sys::CThostFtdcRspInfoField {
+    pub fn error_msg(&self) -> String { decode_ctp_text(&self.ErrorMsg) }
+}
+impl sys::CThostFtdcExchangeOrderInsertErrorField {
+    pub fn error_msg(&self) -> String { decode_ctp_text(&self.ErrorMsg) }
+}
+impl sys::CThostFtdcExchangeOrderActionErrorField {
+    pub fn error_msg(&self) -> String { decode_ctp_text(&self.ErrorMsg) }
+}
+impl sys::CThostFtdcOrderField {
+    pub fn status_msg(&self) -> String { decode_ctp_text(&self.StatusMsg) }
+}
+impl sys::CThostFtdcOrderActionField {
+    pub fn status_msg(&self) -> String { decode_ctp_text(&self.StatusMsg) }
+}
+
+"#;
         for class_name in CLASSES.into_iter().filter(|name| name.ends_with("Spi")) {
             let class = classes
                 .get(class_name)
@@ -387,7 +439,7 @@ pub enum Error {
 }
 "#;
 
-const REQUEST_BUILDERS_SUPPORT: &str = r#"//! Builders for bindgen request types. Unset fields retain their zero defaults.
+const REQUEST_BUILDERS_SUPPORT: &str = r#"//! Builders for bindgen request types. Hedge flags default to speculation; other fields default to zero.
 //! Text setters write UTF-8 bytes; use the public raw fields for other encodings.
 
 use crate::sys;
@@ -397,7 +449,7 @@ use std::ffi::c_char;
 pub enum FieldError {
     #[error("{field} contains an interior NUL byte")]
     InteriorNul { field: &'static str },
-    #[error("{field} is {length} bytes long, but its text capacity is {capacity} bytes")]
+    #[error("{field} is {length} bytes long, but its capacity is {capacity} bytes")]
     TooLong { field: &'static str, length: usize, capacity: usize },
 }
 
@@ -413,6 +465,18 @@ fn write_text<const N: usize>(target: &mut [c_char; N], value: &str, field: &'st
         *target = byte as c_char;
     }
     Ok(())
+}
+
+fn write_bytes<const N: usize>(target: &mut [c_char; N], value: &[u8], field: &'static str) -> Result<i32, FieldError> {
+    let capacity = N.min(i32::MAX as usize);
+    if value.len() > capacity {
+        return Err(FieldError::TooLong { field, length: value.len(), capacity });
+    }
+    target.fill(0);
+    for (target, byte) in target.iter_mut().zip(value.iter().copied()) {
+        *target = byte as c_char;
+    }
+    Ok(value.len() as i32)
 }
 
 "#;

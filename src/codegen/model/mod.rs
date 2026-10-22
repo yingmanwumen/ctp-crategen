@@ -12,6 +12,7 @@ pub struct RequestField {
     pub name: String,
     pub rust_type: String,
     pub kind: RequestFieldKind,
+    pub length_field: Option<String>,
     pub doc: Option<String>,
 }
 
@@ -20,6 +21,8 @@ pub enum RequestFieldKind {
     Value,
     Text,
     CharacterCode,
+    CharacterCodeArray,
+    Bytes,
 }
 
 #[derive(Debug, Clone)]

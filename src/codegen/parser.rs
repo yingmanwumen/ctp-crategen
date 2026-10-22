@@ -115,6 +115,17 @@ impl<'a> Parser<'a> {
                 }
             });
             let record = record.with_context(|| format!("request struct not found: {name}"))?;
+            let length_fields = record
+                .get_children()
+                .into_iter()
+                .filter(|field| {
+                    field.get_kind() == EntityKind::FieldDecl
+                        && field
+                            .get_type()
+                            .is_some_and(|ty| ty.get_canonical_type().get_kind() == TypeKind::Int)
+                })
+                .filter_map(|field| field.get_name())
+                .collect::<HashSet<_>>();
             let mut fields = Vec::new();
             for field in record
                 .get_children()
@@ -135,19 +146,19 @@ impl<'a> Parser<'a> {
                 let kind = if canonical.get_kind() == TypeKind::ConstantArray
                     && canonical.get_element_type().is_some_and(|element| {
                         matches!(element.get_kind(), TypeKind::CharS | TypeKind::CharU)
-                    })
-                    && typedef.starts_with("TThostFtdc")
-                    // Flag lists and length-delimited binary buffers are not C strings.
-                    && !matches!(
-                        typedef.as_str(),
-                        "TThostFtdcCombOffsetFlagType"
-                            | "TThostFtdcCombHedgeFlagType"
-                            | "TThostFtdcClientSystemInfoType"
-                            | "TThostFtdcAdditionalInfoType"
-                            | "TThostFtdcCaptchaInfoType"
-                            | "TThostFtdcHandshakeDataType"
-                    ) {
-                    RequestFieldKind::Text
+                    }) {
+                    match typedef.as_str() {
+                        "TThostFtdcCombOffsetFlagType" | "TThostFtdcCombHedgeFlagType" => {
+                            RequestFieldKind::CharacterCodeArray
+                        }
+                        // These buffers may contain NUL bytes and use a separate length field.
+                        "TThostFtdcClientSystemInfoType"
+                        | "TThostFtdcAdditionalInfoType"
+                        | "TThostFtdcCaptchaInfoType"
+                        | "TThostFtdcHandshakeDataType" => RequestFieldKind::Bytes,
+                        _ if typedef.starts_with("TThostFtdc") => RequestFieldKind::Text,
+                        _ => RequestFieldKind::Bytes,
+                    }
                 } else if matches!(canonical.get_kind(), TypeKind::CharS | TypeKind::CharU)
                     && typedef.starts_with("TThostFtdc")
                     && ty
@@ -175,10 +186,18 @@ impl<'a> Parser<'a> {
                 } else {
                     RequestFieldKind::Value
                 };
+                let field_name = field.get_name().context("unnamed request field")?;
+                let length_field = if matches!(kind, RequestFieldKind::Bytes) {
+                    let candidate = format!("{field_name}Len");
+                    length_fields.contains(&candidate).then_some(candidate)
+                } else {
+                    None
+                };
                 fields.push(RequestField {
-                    name: field.get_name().context("unnamed request field")?,
+                    name: field_name,
                     rust_type: request_field_type(ty)?,
                     kind,
+                    length_field,
                     doc: field.get_comment(),
                 });
             }
