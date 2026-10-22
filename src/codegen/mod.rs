@@ -106,6 +106,10 @@ fn main() {
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let bridge = out.join("libctp_bridge.so");
 
+    // Keep the bridge self-contained: runtime libraries are staged beside it
+    // and the bridge resolves them relative to its own location.
+    stage_runtime_libraries(&vendor, &out);
+
     // Also detect added or removed SDK libraries and headers.
     println!("cargo:rerun-if-changed={}", vendor.display());
     println!("cargo:rerun-if-env-changed=CXX");
@@ -149,7 +153,7 @@ fn main() {
     compiler
         .arg("-Wl,-z,defs")
         .arg("-Wl,-soname,libctp_bridge.so")
-        .arg(format!("-Wl,-rpath,{}", vendor.display()))
+        .arg("-Wl,-rpath,$ORIGIN")
         .arg("-o")
         .arg(&bridge);
 
@@ -160,6 +164,20 @@ fn main() {
     println!("cargo:rustc-link-lib=dylib=ctp_bridge");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", out.display());
 
+}
+
+fn stage_runtime_libraries(vendor: &PathBuf, out: &PathBuf) {
+    let entries = fs::read_dir(vendor).expect("failed to read vendor directory");
+    for entry in entries {
+        let source = entry.expect("failed to read vendor entry").path();
+        if source.extension().is_none_or(|ext| ext != "so") {
+            continue;
+        }
+        let destination = out.join(source.file_name().expect("library has no file name"));
+        fs::copy(&source, &destination).unwrap_or_else(|error| {
+            panic!("failed to stage {}: {error}", source.display())
+        });
+    }
 }
 "#
         .to_owned()

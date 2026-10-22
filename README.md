@@ -24,6 +24,11 @@ thosttraderapi_se_6.7.2.so -> thosttraderapi_se.so
 SONAME 或创建软链接。替换 library 的其他依赖也需要放入 `vendor/`，例如
 `librohonbase.so` 和 `libLinuxDataCollect.so`。
 
+构建生成 crate 时，`build.rs` 会把 `vendor/` 中的动态库 staging 到 bridge
+所在目录，并将 bridge 的运行时搜索路径设置为 `$ORIGIN`。因此 bridge 不会
+记录本机 SDK 目录的绝对路径；构建目录移动后，bridge 仍会从自身目录查找
+CTP library。
+
 生成 crate 的高级 API 不复制另一套 CTP struct。请求和回调仍然使用 bindgen struct，以保持 ABI、字段完整性和不同 SDK 版本的兼容性；builder 和 helper 负责减少常见 FFI 操作。
 
 ## 构建
