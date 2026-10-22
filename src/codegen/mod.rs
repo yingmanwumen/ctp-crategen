@@ -11,6 +11,7 @@ use std::{
 
 use bindgen::Bindings;
 use clang::{Clang, Index};
+use goblin::Object;
 
 use crate::{
     codegen::{
@@ -88,6 +89,10 @@ impl Codegen {
                 errors.as_ref().is_some_and(|errors| !errors.is_empty()),
             )?,
         )?;
+        Self::write_file(
+            self.output_dir.join("examples").join("version.rs"),
+            &self.version_example_codegen(),
+        )?;
 
         Ok(())
     }
@@ -119,7 +124,9 @@ fn main() {
         .expect("failed to read vendor directory")
         .map(|entry| entry.expect("failed to read vendor entry").path())
         .filter(|path| {
-            path.is_file() && path.extension().is_some_and(|ext| ext == "so")
+            path.symlink_metadata()
+                .is_ok_and(|metadata| metadata.file_type().is_file())
+                && path.extension().is_some_and(|ext| ext == "so")
         })
         .collect::<Vec<_>>();
     libraries.sort();
@@ -190,7 +197,25 @@ thiserror = "2"
             let entry = entry?;
             let path = entry.path();
             if path.is_file() && path.extension().is_some_and(|ext| ext == "so") {
-                std::fs::copy(&path, vendor_dir.join(entry.file_name()))?;
+                let filename = entry.file_name();
+                let destination = vendor_dir.join(&filename);
+                std::fs::copy(&path, &destination)?;
+
+                if let Some(soname) = shared_object_soname(&path)? {
+                    let soname_path = vendor_dir.join(&soname);
+                    if soname_path != destination {
+                        // The linker records SONAME in DT_NEEDED. Keep an
+                        // alias so replacement libraries can retain their
+                        // original ELF metadata.
+                        if soname_path.exists() || soname_path.symlink_metadata().is_ok() {
+                            std::fs::remove_file(&soname_path)?;
+                        }
+                        #[cfg(unix)]
+                        std::os::unix::fs::symlink(&filename, &soname_path)?;
+                        #[cfg(not(unix))]
+                        anyhow::bail!("SONAME aliases are only supported on Unix");
+                    }
+                }
             }
         }
 
@@ -251,6 +276,7 @@ extern "C" {
 }
 #endif
 "#;
+
         Ok((hpp, cpp))
     }
 
@@ -416,6 +442,15 @@ impl sys::CThostFtdcOrderActionField {
         }
         Ok(rust)
     }
+}
+
+fn shared_object_soname(path: &Path) -> anyhow::Result<Option<String>> {
+    let bytes = std::fs::read(path)?;
+    let object = Object::parse(&bytes)?;
+    Ok(match object {
+        Object::Elf(elf) => elf.soname.map(str::to_owned),
+        _ => None,
+    })
 }
 
 const ERROR_SUPPORT: &str = r#"//! Errors from the Rust wrapper and immediate SDK request returns.

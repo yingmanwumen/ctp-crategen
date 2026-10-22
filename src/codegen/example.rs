@@ -3,6 +3,11 @@ use std::collections::HashMap;
 use super::{Codegen, model::Class};
 
 impl Codegen {
+    pub(super) fn version_example_codegen(&self) -> String {
+        include_str!("example/version.rs")
+            .replace("__CRATE_NAME__", &self.crate_name.replace('-', "_"))
+    }
+
     pub(super) fn basic_example_codegen(
         &self,
         classes: &HashMap<&str, Class>,
