@@ -2,6 +2,7 @@ use heck::ToSnakeCase;
 
 mod error;
 mod request;
+mod spi;
 
 use super::{Class, Method, Param};
 
@@ -9,11 +10,21 @@ impl Class {
     fn rust_builder_codegen(&self, factory: &Method) -> anyhow::Result<String> {
         let api_name = self.name.strip_prefix("CThostFtdc").unwrap_or(&self.name);
         let builder_name = format!("{api_name}Builder");
+        let spi_name = api_name.replace("Api", "Spi");
+        let spi_owner = format!("{spi_name}Owner");
         let prefix = self.name.to_snake_case();
 
-        let mut fields = String::new();
-        let mut defaults = String::new();
-        let mut setters = String::new();
+        let mut fields = format!("    spi: Option<Box<dyn {spi_name}>>,\n");
+        let mut defaults = String::from("            spi: None,\n");
+        let mut setters = format!(
+            r#"
+    /// Installs the handler before starting the SDK. Callbacks may run before `build()` returns.
+    pub fn spi(mut self, spi: impl {spi_name}) -> Self {{
+        self.spi = Some(Box::new(spi));
+        self
+    }}
+"#
+        );
         let mut setup = String::new();
         let mut args = Vec::new();
         for param in &factory.params {
@@ -184,13 +195,16 @@ impl {builder_name} {{
 {setters}
     /// Creates, configures and starts the SDK; connection and login remain asynchronous.
     pub fn build(mut self) -> Result<{api_name}, Error> {{
-{setup}        let raw = unsafe {{ sys::{factory_name}({args}) }};
+{setup}        let spi = self.spi.take().map({spi_owner}::new).transpose()?;
+        let raw = unsafe {{ sys::{factory_name}({args}) }};
         let handle = NonNull::new(raw).ok_or(Error::CreateFailed("{api_name}"))?;
+        let api = {api_name} {{ handle: Some(handle), spi }};
+        if let Some(spi) = api.spi.as_ref() {{
+            unsafe {{ sys::{prefix}_register_spi(handle.as_ptr(), spi.raw()); }}
+        }}
 {configuration}
         unsafe {{ sys::{prefix}_init(handle.as_ptr()); }}
-        Ok({api_name} {{
-            handle: Some(handle),
-        }})
+        Ok(api)
     }}
 }}
 "#
@@ -200,6 +214,7 @@ impl {builder_name} {{
     pub fn rust_codegen(&self) -> anyhow::Result<String> {
         let api_name = self.name.strip_prefix("CThostFtdc").unwrap_or(&self.name);
         let builder_name = format!("{api_name}Builder");
+        let spi_owner = format!("{}Owner", api_name.replace("Api", "Spi"));
         let release_name = format!("{}_release", self.name.to_snake_case());
         let factory = self
             .methods
@@ -221,6 +236,8 @@ impl {builder_name} {{
             r#"{builder}
 pub struct {api_name} {{
     handle: Option<NonNull<c_void>>,
+    // Dropped only after release_inner() has stopped the SDK callback threads.
+    spi: Option<{spi_owner}>,
 }}
 
 impl {api_name} {{
@@ -238,6 +255,7 @@ impl {api_name} {{
 
     fn release_inner(&mut self) {{
         if let Some(handle) = self.handle.take() {{
+            // Keep the SPI and its userdata alive throughout Release, which joins SDK threads.
             unsafe {{
                 sys::{release_name}(handle.as_ptr());
             }}

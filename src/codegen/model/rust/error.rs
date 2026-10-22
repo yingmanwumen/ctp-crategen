@@ -1,12 +1,19 @@
+use heck::ToUpperCamelCase;
+
 use super::super::ErrorCode;
 
 impl ErrorCode {
-    pub fn rust_codegen(&self) -> (String, String) {
-        let name = &self.name;
+    pub fn rust_codegen(&self) -> (String, String, String) {
+        let name = if self.name == "NONE" && self.value == 0 {
+            String::from("Success")
+        } else {
+            self.name.to_upper_camel_case()
+        };
         let value = self.value;
         let prompt = format!("{:?}", self.prompt);
-        let constant = format!("pub const CTP_ERROR_{name}: i32 = {value};\n");
-        let branch = format!("        {value} => Some({prompt}),\n");
-        (constant, branch)
+        let variant = format!("    #[doc = {prompt}]\n    {name} = {value},\n");
+        let from_code = format!("            {value} => Ok(Self::{name}),\n");
+        let message = format!("            Self::{name} => {prompt},\n");
+        (variant, from_code, message)
     }
 }

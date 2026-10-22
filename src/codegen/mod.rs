@@ -69,14 +69,11 @@ impl Codegen {
             &self.cargo_toml_codegen(),
         )?;
 
-        let mut rust_lib = self.rust_lib_codegen(sdk, &classes)?;
-        if let Some(errors) = errors {
-            Self::write_file(
-                self.output_dir.join("src").join("business_errors.rs"),
-                &self.business_errors_codegen(&errors),
-            )?;
-            rust_lib += "\npub mod business_errors;\n";
-        }
+        let rust_lib = self.rust_lib_codegen(&classes)?;
+        Self::write_file(
+            self.output_dir.join("src").join("error.rs"),
+            &self.error_codegen(errors.as_deref()),
+        )?;
         Self::write_file(self.output_dir.join("src").join("lib.rs"), &rust_lib)?;
         let mut builders = String::from(REQUEST_BUILDERS_SUPPORT);
         for request in &requests {
@@ -106,8 +103,8 @@ fn main() {
     println!("cargo:rerun-if-changed={}", root.join("Cargo.toml").display());
     println!("cargo:rerun-if-changed={}", root.join("src").join("sys.rs").display());
     println!("cargo:rerun-if-changed={}", root.join("src").join("lib.rs").display());
-    if root.join("src").join("business_errors.rs").exists() {
-        println!("cargo:rerun-if-changed={}", root.join("src").join("business_errors.rs").display());
+    if root.join("src").join("error.rs").exists() {
+        println!("cargo:rerun-if-changed={}", root.join("src").join("error.rs").display());
     }
 
     let mut libraries = fs::read_dir(&vendor)
@@ -276,34 +273,55 @@ extern "C" {
         std::fs::write(path, content)
     }
 
-    fn business_errors_codegen(&self, errors: &[ErrorCode]) -> String {
-        let (mut constants, mut branches) = (String::new(), String::new());
+    fn error_codegen(&self, errors: Option<&[ErrorCode]>) -> String {
+        let mut rust = String::from(ERROR_SUPPORT);
+        let Some(errors) = errors.filter(|errors| !errors.is_empty()) else {
+            return rust;
+        };
+        let (mut variants, mut from_codes, mut messages) =
+            (String::new(), String::new(), String::new());
         for error in errors {
-            let (constant, branch) = error.rust_codegen();
-            constants += &constant;
-            branches += &branch;
+            let (variant, from_code, message) = error.rust_codegen();
+            variants += &variant;
+            from_codes += &from_code;
+            messages += &message;
         }
-        format!(
-            r#"#![allow(non_upper_case_globals)]
+        rust += &format!(
+            r#"
+/// CTP business response codes from error.xml, not immediate API request return codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum BusinessErrorCode {{
+{variants}}}
 
-{constants}
-pub fn business_error_message(code: i32) -> Option<&'static str> {{
-    match code {{
-{branches}        _ => None,
+impl TryFrom<i32> for BusinessErrorCode {{
+    type Error = i32;
+
+    fn try_from(code: i32) -> Result<Self, Self::Error> {{
+        match code {{
+{from_codes}            code => Err(code),
+        }}
+    }}
+}}
+
+impl BusinessErrorCode {{
+    /// Returns the SDK's generic message, not the response's potentially more specific ErrorMsg.
+    pub const fn message(self) -> &'static str {{
+        match self {{
+{messages}        }}
     }}
 }}
 "#
-        )
+        );
+        rust
     }
 
-    fn rust_lib_codegen(
-        &self,
-        _sdk: &Sdk,
-        classes: &HashMap<&str, Class>,
-    ) -> anyhow::Result<String> {
+    fn rust_lib_codegen(&self, classes: &HashMap<&str, Class>) -> anyhow::Result<String> {
         let mut rust = String::from(
             r#"pub mod sys;
+pub mod error;
 pub mod requests;
+pub use error::{Error, RequestError};
 pub use requests::*;
 
 use std::{
@@ -311,24 +329,6 @@ use std::{
     path::PathBuf,
     ptr::NonNull,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("CTP request returned {code}")]
-pub struct RequestError {
-    pub code: i32,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("invalid C string: {0}")]
-    Nul(#[from] std::ffi::NulError),
-    #[error("failed to create {0}")]
-    CreateFailed(&'static str),
-    #[error("instrument count exceeds c_int")]
-    TooManyInstruments,
-    #[error(transparent)]
-    Request(#[from] RequestError),
-}
 
 fn request_result(code: i32) -> Result<(), RequestError> {
     if code == 0 {
@@ -348,6 +348,12 @@ fn c_string(value: &str) -> Result<Vec<c_char>, Error> {
 
 "#,
         );
+        for class_name in CLASSES.into_iter().filter(|name| name.ends_with("Spi")) {
+            let class = classes
+                .get(class_name)
+                .ok_or_else(|| anyhow::anyhow!("missing SPI class: {class_name}"))?;
+            rust += &class.rust_spi_codegen()?;
+        }
         for class_name in CLASSES {
             if class_name.ends_with("Api") {
                 let class = classes
@@ -359,6 +365,27 @@ fn c_string(value: &str) -> Result<Vec<c_char>, Error> {
         Ok(rust)
     }
 }
+
+const ERROR_SUPPORT: &str = r#"//! Errors from the Rust wrapper and immediate SDK request returns.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("CTP request returned {code}")]
+pub struct RequestError {
+    pub code: i32,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("invalid C string: {0}")]
+    Nul(#[from] std::ffi::NulError),
+    #[error("failed to create {0}")]
+    CreateFailed(&'static str),
+    #[error("instrument count exceeds c_int")]
+    TooManyInstruments,
+    #[error(transparent)]
+    Request(#[from] RequestError),
+}
+"#;
 
 const REQUEST_BUILDERS_SUPPORT: &str = r#"//! Builders for bindgen request types. Unset fields retain their zero defaults.
 //! Text setters write UTF-8 bytes; use the public raw fields for other encodings.
