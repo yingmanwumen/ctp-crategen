@@ -24,10 +24,7 @@ use crate::{
 const BRIDGE_CPP_NAME: &str = "ctp_brdige.cpp";
 const BRIDGE_HPP_NAME: &str = "ctp_brdige.hpp";
 
-/// 1. Generate C bridge code
-/// 2. Compile ctp_c.so
-/// 3. Rust bindgen
-/// 4. Combine them into a crate/module
+/// Generates a standalone Rust crate from a validated CTP SDK.
 pub struct Codegen {
     output_dir: PathBuf,
     crate_name: String,
@@ -35,6 +32,11 @@ pub struct Codegen {
 }
 
 impl Codegen {
+    /// Creates a generator for `output_dir`.
+    ///
+    /// `crate_name` is written to the generated package manifest. When
+    /// `error_xml` is enabled, an SDK `error.xml` file is converted into a
+    /// generated business-error enum.
     pub fn new(output_dir: PathBuf, crate_name: String, error_xml: bool) -> Self {
         Self {
             output_dir,
@@ -43,6 +45,11 @@ impl Codegen {
         }
     }
 
+    /// Generates Rust bindings, the C++ bridge, wrappers, examples, and the
+    /// vendored SDK libraries.
+    ///
+    /// The output directory is created as needed. Existing generated files
+    /// with the same names are replaced.
     pub fn generate(&self, sdk: &Sdk) -> anyhow::Result<()> {
         let errors = if self.error_xml {
             sdk.get_error_xml()?

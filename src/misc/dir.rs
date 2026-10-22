@@ -1,3 +1,5 @@
+//! A validated, canonical directory path.
+
 use std::{
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
@@ -6,9 +8,11 @@ use std::{
 use anyhow::anyhow;
 
 #[derive(Debug, Clone)]
+/// A filesystem path known to refer to a directory.
 pub struct DirBuf(PathBuf);
 
 impl DirBuf {
+    /// Creates a validated directory path.
     pub fn new(path: &str) -> anyhow::Result<Self> {
         Self::try_from(path)
     }

@@ -1,3 +1,5 @@
+//! Types and constants for locating and reading CTP SDK files.
+
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -7,6 +9,7 @@ use crate::misc::dir::DirBuf;
 use encoding_rs::{GBK, UTF_8};
 use thiserror::Error;
 
+/// Header files required by the generator.
 pub const HEADERS: [&str; 4] = [
     "ThostFtdcTraderApi.h",
     "ThostFtdcMdApi.h",
@@ -14,8 +17,10 @@ pub const HEADERS: [&str; 4] = [
     "ThostFtdcUserApiDataType.h",
 ];
 
+/// Shared libraries required by the generator.
 pub const LIBS: [&str; 2] = ["thosttraderapi_se.so", "thostmduserapi_se.so"];
 
+/// CTP classes for which the generator emits wrappers or SPI bindings.
 pub const CLASSES: [&str; 4] = [
     "CThostFtdcTraderSpi",
     "CThostFtdcTraderApi",
@@ -27,7 +32,7 @@ pub const CLASSES: [&str; 4] = [
 /// An SDK located at a validated directory.
 pub struct Sdk {
     dir: DirBuf,
-    /// Header file name to UTF-8 contents.
+    /// Decoded header contents keyed by their SDK file names.
     headers: HashMap<&'static str, String>,
 }
 
@@ -37,9 +42,10 @@ pub enum VerifyError {
     /// The SDK directory could not be read.
     #[error("failed to read SDK directory")]
     Io(#[from] std::io::Error),
-    /// One or more required SDK files https://crates.io/search?q=ctp-crategenare missing.
+    /// One or more required SDK files are missing.
     #[error("missing SDK files: {0:?}")]
     Missing(Vec<&'static str>),
+    /// A required text file is neither valid UTF-8 nor valid GBK.
     #[error("cannot detect encoding of file: {0:?}")]
     Encoding(PathBuf),
 }
@@ -67,6 +73,7 @@ impl Sdk {
         self.headers.get(header)
     }
 
+    /// Returns the decoded optional `error.xml` contents.
     pub fn get_error_xml(&self) -> Result<Option<String>, VerifyError> {
         let path = self.dir.as_ref().join("error.xml");
         if path.try_exists()? {
