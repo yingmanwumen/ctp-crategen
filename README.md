@@ -2,6 +2,8 @@
 
 `ctp-crategen` 根据 CTP SDK 目录生成 Rust crate。生成结果包含 bindgen 生成的 FFI 类型、C++ bridge、请求 builder、Trader/MD SPI trait，以及基础 examples。
 
+本项目采用 `MIT OR Apache-2.0` 双许可证。
+
 > 当前版本仅支持 **Linux**。Windows、macOS 和其他平台尚未支持。
 
 ## 工作原理
