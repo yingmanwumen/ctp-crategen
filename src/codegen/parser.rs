@@ -306,8 +306,6 @@ impl<'a> Parser<'a> {
                     return_type,
                     params,
                     is_static: method.is_static_method(),
-                    is_virtual: method.is_virtual_method(),
-                    is_pure: method.is_pure_virtual_method(),
                     doc: method.get_comment(),
                 }
             })
@@ -316,7 +314,6 @@ impl<'a> Parser<'a> {
         Ok(Class {
             name: String::from(class_name),
             methods,
-            doc: class.get_comment(),
         })
     }
 
@@ -382,13 +379,12 @@ impl<'a> Parser<'a> {
 }
 
 fn request_field_type(ty: Type<'_>) -> anyhow::Result<String> {
-    if let Some(name) = ty.get_declaration().and_then(|decl| decl.get_name()) {
-        if name.starts_with("TThostFtdc")
+    if let Some(name) = ty.get_declaration().and_then(|decl| decl.get_name())
+        && (name.starts_with("TThostFtdc")
             || name.starts_with("CThostFtdc")
-            || name.starts_with("THOST_")
-        {
-            return Ok(format!("sys::{name}"));
-        }
+            || name.starts_with("THOST_"))
+    {
+        return Ok(format!("sys::{name}"));
     }
     let canonical = ty.get_canonical_type();
     let rust = match canonical.get_kind() {

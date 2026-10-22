@@ -29,7 +29,6 @@ pub enum RequestFieldKind {
 pub struct Class {
     pub name: String,
     pub methods: Vec<Method>,
-    pub doc: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,8 +37,6 @@ pub struct Method {
     pub return_type: String,
     pub params: Vec<Param>,
     pub is_static: bool,
-    pub is_virtual: bool,
-    pub is_pure: bool,
     pub doc: Option<String>,
 }
 
