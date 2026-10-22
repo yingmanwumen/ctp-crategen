@@ -1,6 +1,7 @@
 use heck::ToSnakeCase;
 
 mod error;
+mod request;
 
 use super::{Class, Method, Param};
 

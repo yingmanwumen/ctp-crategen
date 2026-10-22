@@ -13,7 +13,7 @@ use clang::{Clang, Index};
 
 use crate::{
     codegen::{
-        model::{Class, ErrorCode},
+        model::{Class, ErrorCode, RequestStruct},
         parser::Parser,
     },
     sdk::{CLASSES, HEADERS, Sdk},
@@ -50,7 +50,7 @@ impl Codegen {
             None
         };
         self.copy_sdk(sdk)?;
-        let classes = self.parse_classes(sdk)?;
+        let (classes, requests) = self.parse_classes(sdk)?;
         let (hpp, cpp) = self.cpp_bridge_codegen(&classes)?;
 
         Self::write_file(self.output_dir.join("vendor").join(BRIDGE_HPP_NAME), &hpp)?;
@@ -78,6 +78,11 @@ impl Codegen {
             rust_lib += "\npub mod business_errors;\n";
         }
         Self::write_file(self.output_dir.join("src").join("lib.rs"), &rust_lib)?;
+        let mut builders = String::from(REQUEST_BUILDERS_SUPPORT);
+        for request in &requests {
+            builders += &request.rust_codegen();
+        }
+        Self::write_file(self.output_dir.join("src").join("requests.rs"), &builders)?;
 
         Ok(())
     }
@@ -186,15 +191,20 @@ thiserror = "2"
         Ok(())
     }
 
-    fn parse_classes(&self, sdk: &Sdk) -> anyhow::Result<HashMap<&str, Class>> {
+    fn parse_classes(
+        &self,
+        sdk: &Sdk,
+    ) -> anyhow::Result<(HashMap<&str, Class>, Vec<RequestStruct>)> {
         let clang = Clang::new().map_err(|e| anyhow::anyhow!(e))?;
         let index = Index::new(&clang, false, false);
         let parser = Parser::new(sdk, &index)?;
 
-        CLASSES
+        let classes = CLASSES
             .iter()
             .map(|&class_name| parser.parse(class_name).map(|res| (class_name, res)))
-            .collect::<anyhow::Result<HashMap<_, _>>>()
+            .collect::<anyhow::Result<HashMap<_, _>>>()?;
+        let requests = parser.request_structs(&classes)?;
+        Ok((classes, requests))
     }
 
     /// Generate .hpp & .cpp
@@ -240,6 +250,7 @@ extern "C" {
 
     fn rust_bindgen(&self, sdk: &Sdk, wrapper_hpp: &str) -> anyhow::Result<Bindings> {
         Ok(bindgen::Builder::default()
+            .derive_default(true)
             .clang_args(["-x", "c++"])
             .header_contents(
                 "ThostFtdcUserApiStruct.h",
@@ -292,6 +303,8 @@ pub fn business_error_message(code: i32) -> Option<&'static str> {{
     ) -> anyhow::Result<String> {
         let mut rust = String::from(
             r#"pub mod sys;
+pub mod requests;
+pub use requests::*;
 
 use std::{
     ffi::{CStr, CString, c_char, c_void},
@@ -346,3 +359,33 @@ fn c_string(value: &str) -> Result<Vec<c_char>, Error> {
         Ok(rust)
     }
 }
+
+const REQUEST_BUILDERS_SUPPORT: &str = r#"//! Builders for bindgen request types. Unset fields retain their zero defaults.
+//! Text setters write UTF-8 bytes; use the public raw fields for other encodings.
+
+use crate::sys;
+use std::ffi::c_char;
+
+#[derive(Debug, thiserror::Error)]
+pub enum FieldError {
+    #[error("{field} contains an interior NUL byte")]
+    InteriorNul { field: &'static str },
+    #[error("{field} is {length} bytes long, but its text capacity is {capacity} bytes")]
+    TooLong { field: &'static str, length: usize, capacity: usize },
+}
+
+fn write_text<const N: usize>(target: &mut [c_char; N], value: &str, field: &'static str) -> Result<(), FieldError> {
+    if value.as_bytes().contains(&0) {
+        return Err(FieldError::InteriorNul { field });
+    }
+    if N == 0 || value.len() >= N {
+        return Err(FieldError::TooLong { field, length: value.len(), capacity: N.saturating_sub(1) });
+    }
+    target.fill(0);
+    for (target, byte) in target.iter_mut().zip(value.bytes()) {
+        *target = byte as c_char;
+    }
+    Ok(())
+}
+
+"#;

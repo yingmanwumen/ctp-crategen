@@ -2,6 +2,27 @@ mod cpp;
 mod rust;
 
 #[derive(Debug, Clone)]
+pub struct RequestStruct {
+    pub name: String,
+    pub fields: Vec<RequestField>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RequestField {
+    pub name: String,
+    pub rust_type: String,
+    pub kind: RequestFieldKind,
+    pub doc: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RequestFieldKind {
+    Value,
+    Text,
+    CharacterCode,
+}
+
+#[derive(Debug, Clone)]
 pub struct Class {
     pub name: String,
     pub methods: Vec<Method>,

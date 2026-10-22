@@ -1,15 +1,20 @@
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use anyhow::Context;
 
 use clang::{
     Entity,
     EntityKind::{self},
-    EntityVisitResult, Index, TranslationUnit, Unsaved,
+    EntityVisitResult, Index, TranslationUnit, Type, TypeKind, Unsaved,
 };
 
 use crate::{
-    codegen::model::{Class, ErrorCode, Method, Param},
+    codegen::model::{
+        Class, ErrorCode, Method, Param, RequestField, RequestFieldKind, RequestStruct,
+    },
     sdk::{HEADERS, Sdk},
 };
 
@@ -78,6 +83,111 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    pub fn request_structs(
+        &self,
+        classes: &HashMap<&str, Class>,
+    ) -> anyhow::Result<Vec<RequestStruct>> {
+        let mut pending = classes
+            .values()
+            .filter(|class| class.name.ends_with("Api"))
+            .flat_map(|class| &class.methods)
+            .flat_map(|method| &method.params)
+            .filter_map(|param| param.cpp_type.trim().strip_suffix('*'))
+            .map(|name| name.trim().trim_start_matches("const ").to_owned())
+            .filter(|name| name.starts_with("CThostFtdc") && name.ends_with("Field"))
+            .collect::<Vec<_>>();
+        let mut seen = HashSet::new();
+        let mut structs = Vec::new();
+        while let Some(name) = pending.pop() {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            let mut record = None;
+            self.tu.get_entity().visit_children(|entity, _| {
+                if entity.get_kind() == EntityKind::StructDecl
+                    && entity.get_name().as_deref() == Some(&name)
+                    && entity.is_definition()
+                {
+                    record = Some(entity);
+                    EntityVisitResult::Break
+                } else {
+                    EntityVisitResult::Recurse
+                }
+            });
+            let record = record.with_context(|| format!("request struct not found: {name}"))?;
+            let mut fields = Vec::new();
+            for field in record
+                .get_children()
+                .into_iter()
+                .filter(|field| field.get_kind() == EntityKind::FieldDecl)
+            {
+                let ty = field.get_type().context("request field missing type")?;
+                let canonical = ty.get_canonical_type();
+                if canonical.get_kind() == TypeKind::Record {
+                    pending.push(
+                        canonical
+                            .get_declaration()
+                            .and_then(|decl| decl.get_name())
+                            .context("unnamed nested request struct")?,
+                    );
+                }
+                let typedef = ty.get_display_name();
+                let kind = if canonical.get_kind() == TypeKind::ConstantArray
+                    && canonical.get_element_type().is_some_and(|element| {
+                        matches!(element.get_kind(), TypeKind::CharS | TypeKind::CharU)
+                    })
+                    && typedef.starts_with("TThostFtdc")
+                    // Flag lists and length-delimited binary buffers are not C strings.
+                    && !matches!(
+                        typedef.as_str(),
+                        "TThostFtdcCombOffsetFlagType"
+                            | "TThostFtdcCombHedgeFlagType"
+                            | "TThostFtdcClientSystemInfoType"
+                            | "TThostFtdcAdditionalInfoType"
+                            | "TThostFtdcCaptchaInfoType"
+                            | "TThostFtdcHandshakeDataType"
+                    ) {
+                    RequestFieldKind::Text
+                } else if matches!(canonical.get_kind(), TypeKind::CharS | TypeKind::CharU)
+                    && typedef.starts_with("TThostFtdc")
+                    && ty
+                        .get_declaration()
+                        .and_then(|decl| self.source_span(decl))
+                        .is_some_and(|(file, begin, _)| {
+                            let Some(header) = file
+                                .file_name()
+                                .and_then(|file| file.to_str())
+                                .and_then(|file| self.sdk.get_header(file))
+                            else {
+                                return false;
+                            };
+                            let prefix = &header[..begin];
+                            // CTP declares character constants immediately before their typedef.
+                            // A plain char typedef without such constants retains its raw type.
+                            let block = prefix.rsplit("typedef").next().unwrap_or(prefix);
+                            block.lines().any(|line| {
+                                line.trim_start().starts_with("#define THOST_FTDC_")
+                                    && line.contains('\'')
+                            })
+                        })
+                {
+                    RequestFieldKind::CharacterCode
+                } else {
+                    RequestFieldKind::Value
+                };
+                fields.push(RequestField {
+                    name: field.get_name().context("unnamed request field")?,
+                    rust_type: request_field_type(ty)?,
+                    kind,
+                    doc: field.get_comment(),
+                });
+            }
+            structs.push(RequestStruct { name, fields });
+        }
+        structs.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(structs)
+    }
+
     pub fn new(sdk: &'a Sdk, index: &'a Index<'a>) -> anyhow::Result<Self> {
         let virtual_root = PathBuf::from("/ctp-crategen-virtual");
 
@@ -250,4 +360,48 @@ impl<'a> Parser<'a> {
         let (_, default) = snippet.split_once('=')?;
         (!default.is_empty()).then_some(String::from(default))
     }
+}
+
+fn request_field_type(ty: Type<'_>) -> anyhow::Result<String> {
+    if let Some(name) = ty.get_declaration().and_then(|decl| decl.get_name()) {
+        if name.starts_with("TThostFtdc")
+            || name.starts_with("CThostFtdc")
+            || name.starts_with("THOST_")
+        {
+            return Ok(format!("sys::{name}"));
+        }
+    }
+    let canonical = ty.get_canonical_type();
+    let rust = match canonical.get_kind() {
+        TypeKind::Bool => "bool",
+        TypeKind::CharS | TypeKind::CharU => "std::ffi::c_char",
+        TypeKind::SChar => "i8",
+        TypeKind::UChar => "u8",
+        TypeKind::Short => "std::ffi::c_short",
+        TypeKind::UShort => "std::ffi::c_ushort",
+        TypeKind::Int => "std::ffi::c_int",
+        TypeKind::UInt => "std::ffi::c_uint",
+        TypeKind::Long => "std::ffi::c_long",
+        TypeKind::ULong => "std::ffi::c_ulong",
+        TypeKind::LongLong => "std::ffi::c_longlong",
+        TypeKind::ULongLong => "std::ffi::c_ulonglong",
+        TypeKind::Float => "f32",
+        TypeKind::Double => "f64",
+        TypeKind::ConstantArray => {
+            return Ok(format!(
+                "[{}; {}]",
+                request_field_type(
+                    canonical
+                        .get_element_type()
+                        .context("missing array element")?
+                )?,
+                canonical.get_size().context("missing array size")?
+            ));
+        }
+        _ => anyhow::bail!(
+            "unsupported request builder field type: {}",
+            ty.get_display_name()
+        ),
+    };
+    Ok(rust.to_owned())
 }
