@@ -2,6 +2,8 @@
 
 `ctp-crategen` 根据 CTP SDK 目录生成 Rust crate。生成结果包含 bindgen 生成的 FFI 类型、C++ bridge、请求 builder、Trader/MD SPI trait，以及基础 examples。
 
+> 当前版本仅支持 **Linux**。Windows、macOS 和其他平台尚未支持。
+
 ## 工作原理
 
 生成流程如下：
@@ -29,16 +31,20 @@ SONAME 或创建软链接。替换 library 的其他依赖也需要放入 `vendo
 记录本机 SDK 目录的绝对路径；构建目录移动后，bridge 仍会从自身目录查找
 CTP library。
 
+上述动态库处理依赖 Linux ELF 的 SONAME 和 Unix symbolic link 机制，不能直接
+用于 Windows `.dll` 或 macOS `.dylib`。
+
 生成 crate 的高级 API 不复制另一套 CTP struct。请求和回调仍然使用 bindgen struct，以保持 ABI、字段完整性和不同 SDK 版本的兼容性；builder 和 helper 负责减少常见 FFI 操作。
 
 ## 构建
 
 要求：
 
+- Linux x86_64 环境
 - Rust toolchain
 - C++ compiler
 - libclang，以及 bindgen 所需的 clang 环境
-- Linux CTP SDK 目录及其动态库
+- Linux CTP SDK 目录及其 `.so` 动态库
 
 生成一个 crate：
 
