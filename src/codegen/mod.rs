@@ -12,7 +12,10 @@ use bindgen::Bindings;
 use clang::{Clang, Index};
 
 use crate::{
-    codegen::{model::Class, parser::Parser},
+    codegen::{
+        model::{Class, ErrorCode},
+        parser::Parser,
+    },
     sdk::{CLASSES, HEADERS, Sdk},
 };
 
@@ -25,28 +28,57 @@ const BRIDGE_HPP_NAME: &str = "ctp_brdige.hpp";
 /// 4. Combine them into a crate/module
 pub struct Codegen {
     output_dir: PathBuf,
+    crate_name: String,
+    error_xml: bool,
 }
 
 impl Codegen {
-    pub fn new(output_dir: PathBuf) -> Self {
-        Self { output_dir }
+    pub fn new(output_dir: PathBuf, crate_name: String, error_xml: bool) -> Self {
+        Self {
+            output_dir,
+            crate_name,
+            error_xml,
+        }
     }
 
     pub fn generate(&self, sdk: &Sdk) -> anyhow::Result<()> {
+        let errors = if self.error_xml {
+            sdk.get_error_xml()?
+                .map(|text| parser::parse_error_codes(&text))
+                .transpose()?
+        } else {
+            None
+        };
         self.copy_sdk(sdk)?;
         let classes = self.parse_classes(sdk)?;
-        let (hpp, cpp) = self.cpp_bridge_codegen(classes)?;
+        let (hpp, cpp) = self.cpp_bridge_codegen(&classes)?;
 
         Self::write_file(self.output_dir.join("vendor").join(BRIDGE_HPP_NAME), &hpp)?;
         Self::write_file(self.output_dir.join("vendor").join(BRIDGE_CPP_NAME), &cpp)?;
 
         let rust_binding = self.rust_bindgen(sdk, &hpp)?;
-        Self::write_file(
-            self.output_dir.join("src").join("sys.rs"),
-            &rust_binding.to_string(),
-        )?;
+        let rust_sys = format!(
+            r#"#![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
+{}"#,
+            rust_binding
+        );
+        Self::write_file(self.output_dir.join("src").join("sys.rs"), &rust_sys)?;
         Self::write_file(self.output_dir.join("build.rs"), &self.build_rs_codegen())?;
-        Self::write_file(self.output_dir.join("Cargo.toml"), &self.cargo_toml_codegen())?;
+        Self::write_file(
+            self.output_dir.join("Cargo.toml"),
+            &self.cargo_toml_codegen(),
+        )?;
+
+        let mut rust_lib = self.rust_lib_codegen(sdk, &classes)?;
+        if let Some(errors) = errors {
+            Self::write_file(
+                self.output_dir.join("src").join("business_errors.rs"),
+                &self.business_errors_codegen(&errors),
+            )?;
+            rust_lib += "\npub mod business_errors;\n";
+        }
+        Self::write_file(self.output_dir.join("src").join("lib.rs"), &rust_lib)?;
+
         Ok(())
     }
 
@@ -57,10 +89,21 @@ fn main() {
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let vendor = root.join("vendor");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let bridge = out.join("libctp_bridge.so");
 
     // Also detect added or removed SDK libraries and headers.
     println!("cargo:rerun-if-changed={}", vendor.display());
     println!("cargo:rerun-if-env-changed=CXX");
+
+    // Any `cargo:rerun-if-*` directive disables Cargo's default change
+    // detection, so watch the generated crate's own files explicitly.
+    println!("cargo:rerun-if-changed={}", root.join("build.rs").display());
+    println!("cargo:rerun-if-changed={}", root.join("Cargo.toml").display());
+    println!("cargo:rerun-if-changed={}", root.join("src").join("sys.rs").display());
+    println!("cargo:rerun-if-changed={}", root.join("src").join("lib.rs").display());
+    if root.join("src").join("business_errors.rs").exists() {
+        println!("cargo:rerun-if-changed={}", root.join("src").join("business_errors.rs").display());
+    }
 
     let mut libraries = fs::read_dir(&vendor)
         .expect("failed to read vendor directory")
@@ -91,7 +134,7 @@ fn main() {
         .arg("-Wl,-soname,libctp_bridge.so")
         .arg(format!("-Wl,-rpath,{}", vendor.display()))
         .arg("-o")
-        .arg(out.join("libctp_bridge.so"));
+        .arg(&bridge);
 
     let status = compiler.status().expect("failed to start C++ compiler");
     assert!(status.success(), "bridge compilation failed: {compiler:?}");
@@ -99,14 +142,16 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", out.display());
     println!("cargo:rustc-link-lib=dylib=ctp_bridge");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", out.display());
+
 }
 "#
         .to_owned()
     }
 
     fn cargo_toml_codegen(&self) -> String {
-        r#"[package]
-name = "ctp-sys"
+        format!(
+            r#"[package]
+name = "{}"
 version = "0.1.0"
 edition = "2024"
 build = "build.rs"
@@ -114,8 +159,12 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
-"#
-        .to_owned()
+
+[dependencies]
+thiserror = "2"
+"#,
+            self.crate_name
+        )
     }
 
     fn copy_sdk(&self, sdk: &Sdk) -> anyhow::Result<()> {
@@ -151,7 +200,7 @@ path = "src/lib.rs"
     /// Generate .hpp & .cpp
     fn cpp_bridge_codegen(
         &self,
-        classes: HashMap<&str, Class>,
+        classes: &HashMap<&str, Class>,
     ) -> anyhow::Result<(String, String)> {
         let mut hpp = String::from(
             r#"
@@ -177,7 +226,7 @@ extern "C" {
 "#
         );
         for class in classes.values() {
-            let (class_hpp, class_cpp) = class.codegen();
+            let (class_hpp, class_cpp) = class.cpp_codegen();
             hpp += &class_hpp;
             cpp += &class_cpp;
         }
@@ -214,5 +263,86 @@ extern "C" {
         }
 
         std::fs::write(path, content)
+    }
+
+    fn business_errors_codegen(&self, errors: &[ErrorCode]) -> String {
+        let (mut constants, mut branches) = (String::new(), String::new());
+        for error in errors {
+            let (constant, branch) = error.rust_codegen();
+            constants += &constant;
+            branches += &branch;
+        }
+        format!(
+            r#"#![allow(non_upper_case_globals)]
+
+{constants}
+pub fn business_error_message(code: i32) -> Option<&'static str> {{
+    match code {{
+{branches}        _ => None,
+    }}
+}}
+"#
+        )
+    }
+
+    fn rust_lib_codegen(
+        &self,
+        _sdk: &Sdk,
+        classes: &HashMap<&str, Class>,
+    ) -> anyhow::Result<String> {
+        let mut rust = String::from(
+            r#"pub mod sys;
+
+use std::{
+    ffi::{CStr, CString, c_char, c_void},
+    path::PathBuf,
+    ptr::NonNull,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("CTP request returned {code}")]
+pub struct RequestError {
+    pub code: i32,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("invalid C string: {0}")]
+    Nul(#[from] std::ffi::NulError),
+    #[error("failed to create {0}")]
+    CreateFailed(&'static str),
+    #[error("instrument count exceeds c_int")]
+    TooManyInstruments,
+    #[error(transparent)]
+    Request(#[from] RequestError),
+}
+
+fn request_result(code: i32) -> Result<(), RequestError> {
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(RequestError { code })
+    }
+}
+
+fn c_string(value: &str) -> Result<Vec<c_char>, Error> {
+    Ok(CString::new(value)?
+        .into_bytes_with_nul()
+        .into_iter()
+        .map(|byte| byte as c_char)
+        .collect())
+}
+
+"#,
+        );
+        for class_name in CLASSES {
+            if class_name.ends_with("Api") {
+                let class = classes
+                    .get(class_name)
+                    .ok_or_else(|| anyhow::anyhow!("missing API class: {class_name}"))?;
+                rust += &class.rust_codegen()?;
+            }
+        }
+        Ok(rust)
     }
 }

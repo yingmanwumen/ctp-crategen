@@ -67,6 +67,15 @@ impl Sdk {
         self.headers.get(header)
     }
 
+    pub fn get_error_xml(&self) -> Result<Option<String>, VerifyError> {
+        let path = self.dir.as_ref().join("error.xml");
+        if path.try_exists()? {
+            Self::read_text(&path).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Verifies that every required header and shared library exists in the SDK
     /// root directory before any header is read.
     fn verify(dir: &DirBuf) -> Result<(), VerifyError> {

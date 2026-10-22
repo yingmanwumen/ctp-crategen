@@ -1,32 +1,9 @@
 use heck::ToSnakeCase;
 
-#[derive(Debug, Clone)]
-pub struct Class {
-    pub name: String,
-    pub methods: Vec<Method>,
-    pub doc: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Method {
-    pub name: String,
-    pub return_type: String,
-    pub params: Vec<Param>,
-    pub is_static: bool,
-    pub is_virtual: bool,
-    pub is_pure: bool,
-    pub doc: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Param {
-    pub name: String,
-    pub cpp_type: String,
-    pub default: Option<String>,
-}
+use super::{Class, Method, Param};
 
 impl Class {
-    pub fn codegen(&self) -> (String, String) {
+    pub fn cpp_codegen(&self) -> (String, String) {
         if self.name.contains("Api") {
             self.api_codegen()
         } else {
@@ -39,7 +16,11 @@ impl Class {
         for method in &self.methods {
             let params = [
                 vec![String::from("void *userdata")],
-                method.params.iter().map(|param| param.codegen()).collect(),
+                method
+                    .params
+                    .iter()
+                    .map(|param| param.cpp_codegen())
+                    .collect(),
             ]
             .concat()
             .join(", ");
@@ -63,7 +44,7 @@ typedef struct {callback_table_name} {{
             let params = method
                 .params
                 .iter()
-                .map(|param| param.codegen())
+                .map(|param| param.cpp_codegen())
                 .collect::<Vec<_>>()
                 .join(", ");
             let args = [
@@ -164,7 +145,7 @@ void {destroy_wrapper_name}(void *spi_handle) {{
     pub fn api_codegen(&self) -> (String, String) {
         let (mut hpp, mut cpp) = (String::new(), String::new());
         for method in &self.methods {
-            let (method_hpp, method_cpp) = method.codegen(&self.name);
+            let (method_hpp, method_cpp) = method.cpp_codegen(&self.name);
             hpp += &method_hpp;
             cpp += &method_cpp;
         }
@@ -173,7 +154,7 @@ void {destroy_wrapper_name}(void *spi_handle) {{
 }
 
 impl Method {
-    pub fn codegen(&self, class_name: &str) -> (String, String) {
+    pub fn cpp_codegen(&self, class_name: &str) -> (String, String) {
         if self.is_static {
             if self.name.contains("Create") {
                 self.factory_codegen(class_name)
@@ -238,7 +219,7 @@ impl Method {
             vec![String::from("void *handle")],
             self.params
                 .iter()
-                .map(|param| param.codegen())
+                .map(|param| param.cpp_codegen())
                 .collect::<Vec<_>>(),
         ]
         .concat()
@@ -283,7 +264,7 @@ impl Method {
         let params = self
             .params
             .iter()
-            .map(|param| param.codegen())
+            .map(|param| param.cpp_codegen())
             .collect::<Vec<_>>()
             .join(", ");
         let args = self
@@ -323,7 +304,7 @@ impl Method {
         let params = self
             .params
             .iter()
-            .map(|param| param.codegen())
+            .map(|param| param.cpp_codegen())
             .collect::<Vec<_>>()
             .join(", ");
         let args = self
@@ -357,7 +338,7 @@ void *{factory_name}({params}) {{
 }
 
 impl Param {
-    pub fn codegen(&self) -> String {
+    pub fn cpp_codegen(&self) -> String {
         let cpp_type = match self.cpp_type.as_ref() {
             "char *[]" => "char**",
             _ => &self.cpp_type,

@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
+
+use anyhow::Context;
 
 use clang::{
     Entity,
@@ -7,9 +9,67 @@ use clang::{
 };
 
 use crate::{
-    codegen::model::{Class, Method, Param},
+    codegen::model::{Class, ErrorCode, Method, Param},
     sdk::{HEADERS, Sdk},
 };
+
+pub fn parse_error_codes(text: &str) -> anyhow::Result<Vec<ErrorCode>> {
+    let document = roxmltree::Document::parse_with_options(
+        text,
+        roxmltree::ParsingOptions {
+            allow_dtd: true,
+            ..Default::default()
+        },
+    )
+    .context("failed to parse error.xml")?;
+    let root = document.root_element();
+    anyhow::ensure!(
+        root.has_tag_name("errors"),
+        "error.xml root must be <errors>"
+    );
+
+    let mut errors = Vec::new();
+    let mut names = HashSet::new();
+    let mut values = HashSet::new();
+    for node in root.children().filter(|node| node.is_element()) {
+        anyhow::ensure!(
+            node.has_tag_name("error"),
+            "unexpected element in error.xml: {}",
+            node.tag_name().name()
+        );
+        let name = node.attribute("id").context("error.xml entry missing id")?;
+        anyhow::ensure!(
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_'),
+            "invalid error.xml id: {name}"
+        );
+        let value = node
+            .attribute("value")
+            .with_context(|| format!("error.xml entry {name} missing value"))?;
+        let value = if let Some(hex) = value
+            .strip_prefix("0x")
+            .or_else(|| value.strip_prefix("0X"))
+        {
+            i32::from_str_radix(hex, 16)
+        } else {
+            value.parse::<i32>()
+        }
+        .with_context(|| format!("invalid error.xml value for {name}: {value}"))?;
+        let prompt = node
+            .attribute("prompt")
+            .with_context(|| format!("error.xml entry {name} missing prompt"))?;
+        anyhow::ensure!(names.insert(name), "duplicate error.xml id: {name}");
+        anyhow::ensure!(values.insert(value), "duplicate error.xml value: {value}");
+        errors.push(ErrorCode {
+            name: name.to_owned(),
+            value,
+            prompt: prompt.to_owned(),
+        });
+    }
+    Ok(errors)
+}
 
 pub struct Parser<'a> {
     tu: TranslationUnit<'a>,
