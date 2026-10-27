@@ -211,6 +211,32 @@ thiserror = "2"
     }
 
     fn copy_sdk(&self, sdk: &Sdk) -> anyhow::Result<()> {
+        let mut libraries = std::fs::read_dir(sdk.as_ref())?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .filter_map(|entry| match entry {
+                Ok(path) if path.is_file() && path.extension().is_some_and(|ext| ext == "so") => {
+                    Some(Ok(path))
+                }
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<std::io::Result<Vec<_>>>()?;
+        libraries.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+
+        let mut sonames = BTreeMap::new();
+        for library in &libraries {
+            let Some(soname) = shared_object_soname(library)? else {
+                continue;
+            };
+            if let Some(previous) = sonames.insert(soname.clone(), library) {
+                anyhow::bail!(
+                    "duplicate ELF SONAME {soname:?} in {} and {}",
+                    previous.display(),
+                    library.display()
+                );
+            }
+        }
+
         let vendor_dir = self.output_dir.join("vendor");
         std::fs::create_dir_all(&vendor_dir)?;
 
@@ -218,28 +244,24 @@ thiserror = "2"
             std::fs::copy(sdk.as_ref().join(header), vendor_dir.join(header))?;
         }
 
-        for entry in std::fs::read_dir(sdk.as_ref())? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|ext| ext == "so") {
-                let filename = entry.file_name();
-                let destination = vendor_dir.join(&filename);
-                std::fs::copy(&path, &destination)?;
+        for path in libraries {
+            let filename = path.file_name().expect("library has no file name");
+            let destination = vendor_dir.join(filename);
+            std::fs::copy(&path, &destination)?;
 
-                if let Some(soname) = shared_object_soname(&path)? {
-                    let soname_path = vendor_dir.join(&soname);
-                    if soname_path != destination {
-                        // The linker records SONAME in DT_NEEDED. Keep an
-                        // alias so replacement libraries can retain their
-                        // original ELF metadata.
-                        if soname_path.exists() || soname_path.symlink_metadata().is_ok() {
-                            std::fs::remove_file(&soname_path)?;
-                        }
-                        #[cfg(unix)]
-                        std::os::unix::fs::symlink(&filename, &soname_path)?;
-                        #[cfg(not(unix))]
-                        anyhow::bail!("SONAME aliases are only supported on Unix");
+            if let Some(soname) = shared_object_soname(&path)? {
+                let soname_path = vendor_dir.join(&soname);
+                if soname_path != destination {
+                    // The linker records SONAME in DT_NEEDED. Keep an
+                    // alias so replacement libraries can retain their
+                    // original ELF metadata.
+                    if soname_path.exists() || soname_path.symlink_metadata().is_ok() {
+                        std::fs::remove_file(&soname_path)?;
                     }
+                    #[cfg(unix)]
+                    std::os::unix::fs::symlink(filename, &soname_path)?;
+                    #[cfg(not(unix))]
+                    anyhow::bail!("SONAME aliases are only supported on Unix");
                 }
             }
         }
