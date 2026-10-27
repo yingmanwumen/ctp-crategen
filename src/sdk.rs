@@ -1,6 +1,6 @@
 //! Types and constants for locating and reading CTP SDK files.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -33,7 +33,7 @@ pub const CLASSES: [&str; 4] = [
 pub struct Sdk {
     dir: DirBuf,
     /// Decoded header contents keyed by their SDK file names.
-    headers: HashMap<&'static str, String>,
+    headers: BTreeMap<&'static str, String>,
 }
 
 #[derive(Debug, Error)]
@@ -62,7 +62,7 @@ impl Sdk {
             .iter()
             .copied()
             .map(|header| Self::read_text(&dir.as_ref().join(header)).map(|text| (header, text)))
-            .collect::<Result<HashMap<_, _>, VerifyError>>()?;
+            .collect::<Result<BTreeMap<_, _>, VerifyError>>()?;
         Ok(Self { dir, headers })
     }
 

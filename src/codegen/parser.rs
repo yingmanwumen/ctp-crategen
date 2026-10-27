@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     path::PathBuf,
 };
 
@@ -85,7 +85,7 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn request_structs(
         &self,
-        classes: &HashMap<&str, Class>,
+        classes: &BTreeMap<&str, Class>,
     ) -> anyhow::Result<Vec<RequestStruct>> {
         let mut pending = classes
             .values()

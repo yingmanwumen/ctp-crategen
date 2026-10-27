@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::{Codegen, model::Class};
 
@@ -10,7 +10,7 @@ impl Codegen {
 
     pub(super) fn basic_example_codegen(
         &self,
-        classes: &HashMap<&str, Class>,
+        classes: &BTreeMap<&str, Class>,
         has_business_errors: bool,
     ) -> anyhow::Result<String> {
         let private_topic = classes

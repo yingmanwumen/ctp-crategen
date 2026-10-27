@@ -5,7 +5,7 @@ mod model;
 mod parser;
 
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     path::{Path, PathBuf},
 };
 
@@ -250,7 +250,7 @@ thiserror = "2"
     fn parse_classes(
         &self,
         sdk: &Sdk,
-    ) -> anyhow::Result<(HashMap<&str, Class>, Vec<RequestStruct>)> {
+    ) -> anyhow::Result<(BTreeMap<&str, Class>, Vec<RequestStruct>)> {
         let clang = Clang::new().map_err(|e| anyhow::anyhow!(e))?;
         let index = Index::new(&clang, false, false);
         let parser = Parser::new(sdk, &index)?;
@@ -258,7 +258,7 @@ thiserror = "2"
         let classes = CLASSES
             .iter()
             .map(|&class_name| parser.parse(class_name).map(|res| (class_name, res)))
-            .collect::<anyhow::Result<HashMap<_, _>>>()?;
+            .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
         let requests = parser.request_structs(&classes)?;
         Ok((classes, requests))
     }
@@ -266,7 +266,7 @@ thiserror = "2"
     /// Generate .hpp & .cpp
     fn cpp_bridge_codegen(
         &self,
-        classes: &HashMap<&str, Class>,
+        classes: &BTreeMap<&str, Class>,
     ) -> anyhow::Result<(String, String)> {
         let mut hpp = String::from(
             r#"
@@ -376,7 +376,7 @@ impl BusinessErrorCode {{
         rust
     }
 
-    fn rust_lib_codegen(&self, classes: &HashMap<&str, Class>) -> anyhow::Result<String> {
+    fn rust_lib_codegen(&self, classes: &BTreeMap<&str, Class>) -> anyhow::Result<String> {
         let mut rust = String::from(
             r#"pub mod sys;
 pub mod error;
