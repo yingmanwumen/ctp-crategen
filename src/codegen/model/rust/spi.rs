@@ -45,6 +45,7 @@ impl Class {
             trampolines += &format!(
                 r#"
     unsafe extern "C" fn {method_name}({raw_params}) {{
+        let _callback_guard = CallbackGuard::enter();
         // The API owns this stable allocation until Release has joined the SDK threads.
         let context = unsafe {{ &*userdata.cast::<{context}>() }};
         context.handler.{method_name}({args});

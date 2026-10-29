@@ -407,10 +407,29 @@ pub use error::{Error, RequestError};
 pub use requests::*;
 
 use std::{
+    cell::Cell,
     ffi::{CStr, CString, c_char, c_void},
     path::PathBuf,
     ptr::NonNull,
 };
+
+std::thread_local! {
+    static IN_SDK_CALLBACK: Cell<bool> = const { Cell::new(false) };
+}
+
+struct CallbackGuard(bool);
+
+impl CallbackGuard {
+    fn enter() -> Self {
+        Self(IN_SDK_CALLBACK.replace(true))
+    }
+}
+
+impl Drop for CallbackGuard {
+    fn drop(&mut self) {
+        IN_SDK_CALLBACK.set(self.0);
+    }
+}
 
 fn request_result(code: i32) -> Result<(), RequestError> {
     if code == 0 {

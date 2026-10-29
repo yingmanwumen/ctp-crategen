@@ -234,11 +234,20 @@ impl {builder_name} {{
 
         Ok(format!(
             r#"{builder}
+/// Owns an SDK instance. Ownership can move between application threads.
+/// Release from an SDK callback is deferred until that callback can return.
 pub struct {api_name} {{
     handle: Option<NonNull<c_void>>,
     // Dropped only after release_inner() has stopped the SDK callback threads.
     spi: Option<{spi_owner}>,
 }}
+
+// SAFETY: CTP permits API calls from application threads without creator-thread
+// affinity. Moving this owner does not move the C++ instance or SPI allocation.
+// The handler is Send + Sync; Release joins SDK threads before destroying it.
+// Callback-thread destruction is handed to another thread to avoid self-join.
+// This does not implement Sync: shared concurrent API access remains disallowed.
+unsafe impl Send for {api_name} {{}}
 
 impl {api_name} {{
     pub fn builder() -> {builder_name} {{
@@ -254,6 +263,20 @@ impl {api_name} {{
     }}
 
     fn release_inner(&mut self) {{
+        if self.handle.is_some() && IN_SDK_CALLBACK.get() {{
+            // Transfer both allocations: the callback must retain its context until
+            // Release on the cleanup thread has joined the SDK callback thread.
+            let api = std::mem::ManuallyDrop::new(Self {{
+                handle: self.handle.take(),
+                spi: self.spi.take(),
+            }});
+            // On spawn failure, leak rather than run Release on the callback thread.
+            // ManuallyDrop also prevents closure cleanup from freeing an active SPI.
+            let _ = std::thread::Builder::new()
+                .name("ctp-release".into())
+                .spawn(move || drop(std::mem::ManuallyDrop::into_inner(api)));
+            return;
+        }}
         if let Some(handle) = self.handle.take() {{
             // Keep the SPI and its userdata alive throughout Release, which joins SDK threads.
             unsafe {{
