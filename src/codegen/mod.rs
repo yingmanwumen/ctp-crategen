@@ -7,6 +7,7 @@ mod parser;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use bindgen::Bindings;
@@ -100,7 +101,34 @@ impl Codegen {
             self.output_dir.join("examples").join("version.rs"),
             &self.version_example_codegen(),
         )?;
+        self.format_generated_crate()?;
 
+        Ok(())
+    }
+
+    /// Formats the generated crate when Cargo is available in the environment.
+    fn format_generated_crate(&self) -> anyhow::Result<()> {
+        let cargo_available = match Command::new("cargo").arg("--version").status() {
+            Ok(status) => status.success(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                return Err(anyhow::anyhow!(error).context("failed to check Cargo availability"));
+            }
+        };
+        if !cargo_available {
+            return Ok(());
+        }
+
+        let status = Command::new("cargo")
+            .arg("fmt")
+            .current_dir(&self.output_dir)
+            .status()
+            .map_err(|error| anyhow::anyhow!(error).context("failed to run cargo fmt"))?;
+        anyhow::ensure!(
+            status.success(),
+            "cargo fmt failed in {}",
+            self.output_dir.display()
+        );
         Ok(())
     }
 
