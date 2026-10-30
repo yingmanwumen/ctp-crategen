@@ -111,6 +111,11 @@ trader.req_user_login(&mut request, request_id)?;
 
 请求方法最终接收 bindgen struct。这是有意设计：`sys` 层保留完整 FFI 类型，高级 builder 只负责初始化和转换常用字段。
 
+`MdApi` 和 `TraderApi` 实现 `Send + Sync`，可以通过 `Arc` 在多个 application thread
+之间共享并调用 `&self` 请求方法，无需为 API 实例额外添加 `Mutex`。这依赖 CTP SDK
+对同一实例并发请求的线程安全保证。需要 `&mut self` 的方法仍要求独占访问。
+SPI handler 同样要求 `Send + Sync`；handler 的共享可变状态和业务请求顺序由应用自行管理。
+
 ### 组合开平和投机套保
 
 CTP 的 `CombOffsetFlag` 和 `CombHedgeFlag` 在 FFI 中是长度为 5 的字符数组。高级 builder 不要求调用者手动填写数组：
