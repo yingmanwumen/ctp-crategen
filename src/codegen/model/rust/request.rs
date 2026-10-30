@@ -9,16 +9,17 @@ impl RequestStruct {
         let name = name.strip_suffix("Field").unwrap_or(name);
         let builder = format!("{name}Builder");
         let mut setters = String::new();
-        let mut defaults = String::new();
+        let mut default_fields = String::new();
+        let mut array_defaults = String::new();
         for field in &self.fields {
             let field_name = &field.name;
             if field.rust_type == "sys::TThostFtdcCombHedgeFlagType" {
-                defaults += &format!(
+                array_defaults += &format!(
                     "        raw.{field_name}[0] = sys::THOST_FTDC_HF_Speculation as std::ffi::c_char;\n"
                 );
             } else if field.rust_type == "sys::TThostFtdcHedgeFlagType" {
-                defaults += &format!(
-                    "        raw.{field_name} = sys::THOST_FTDC_HF_Speculation as std::ffi::c_char;\n"
+                default_fields += &format!(
+                    "            {field_name}: sys::THOST_FTDC_HF_Speculation as std::ffi::c_char,\n"
                 );
             }
             // The byte setter derives the actual length; do not expose a conflicting setter.
@@ -89,10 +90,17 @@ impl RequestStruct {
 "#
             );
         }
-        let binding = if defaults.is_empty() {
-            "raw"
+        let binding = if array_defaults.is_empty() {
+            ""
         } else {
-            "mut raw"
+            "mut "
+        };
+        let raw_initializer = if default_fields.is_empty() {
+            format!("let {binding}raw = sys::{raw}::default();\n")
+        } else {
+            format!(
+                "let {binding}raw = sys::{raw} {{\n{default_fields}            ..Default::default()\n        }};\n"
+            )
         };
         format!(
             r#"
@@ -115,8 +123,7 @@ pub struct {builder} {{
 
 impl Default for {builder} {{
     fn default() -> Self {{
-        let {binding} = sys::{raw}::default();
-{defaults}        Self {{ raw, error: None }}
+        {raw_initializer}{array_defaults}        Self {{ raw, error: None }}
     }}
 }}
 

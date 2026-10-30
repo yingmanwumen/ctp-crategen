@@ -105,7 +105,7 @@ impl Codegen {
     }
 
     fn build_rs_codegen(&self) -> String {
-        r#"use std::{env, fs, path::PathBuf, process::Command};
+        r#"use std::{env, fs, path::{Path, PathBuf}, process::Command};
 
 fn main() {
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
@@ -173,7 +173,7 @@ fn main() {
 
 }
 
-fn stage_runtime_libraries(vendor: &PathBuf, out: &PathBuf) {
+fn stage_runtime_libraries(vendor: &Path, out: &Path) {
     let entries = fs::read_dir(vendor).expect("failed to read vendor directory");
     for entry in entries {
         let source = entry.expect("failed to read vendor entry").path();
