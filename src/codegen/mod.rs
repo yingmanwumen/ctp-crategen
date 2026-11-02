@@ -402,14 +402,13 @@ extern "C" {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum BusinessErrorCode {{
-{variants}}}
+{variants}    Unknown(i32),
+}}
 
-impl TryFrom<i32> for BusinessErrorCode {{
-    type Error = i32;
-
-    fn try_from(code: i32) -> Result<Self, Self::Error> {{
+impl From<i32> for BusinessErrorCode {{
+    fn from(code: i32) -> Self {{
         match code {{
-{from_codes}            code => Err(code),
+{from_codes}            code => Self::Unknown(code),
         }}
     }}
 }}
@@ -418,7 +417,8 @@ impl BusinessErrorCode {{
     /// Returns the SDK's generic message, not the response's potentially more specific ErrorMsg.
     pub const fn message(self) -> &'static str {{
         match self {{
-{messages}        }}
+{messages}            Self::Unknown(_) => "unknown business error",
+        }}
     }}
 }}
 "#

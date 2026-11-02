@@ -12,7 +12,7 @@ impl ErrorCode {
         let value = self.value;
         let prompt = format!("{:?}", self.prompt);
         let variant = format!("    #[doc = {prompt}]\n    {name} = {value},\n");
-        let from_code = format!("            {value} => Ok(Self::{name}),\n");
+        let from_code = format!("            {value} => Self::{name},\n");
         let message = format!("            Self::{name} => {prompt},\n");
         (variant, from_code, message)
     }

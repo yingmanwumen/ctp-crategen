@@ -40,9 +40,9 @@ impl Codegen {
         let crate_name = self.crate_name.replace('-', "_");
         let business_message = if has_business_errors {
             format!(
-                r#"match {crate_name}::error::BusinessErrorCode::try_from(code) {{
-        Ok(error) => error.message().to_owned(),
-        Err(code) => format!("unknown business error {{code}}"),
+                r#"match {crate_name}::error::BusinessErrorCode::from(code) {{
+        {crate_name}::error::BusinessErrorCode::Unknown(code) => format!("unknown business error {{code}}"),
+        error => error.message().to_owned(),
     }}"#
             )
         } else {
