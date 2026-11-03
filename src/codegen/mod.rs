@@ -480,12 +480,15 @@ fn c_string(value: &str) -> Result<Vec<c_char>, Error> {
         rust += r#"
 /// Decode a CTP character buffer. Human-readable Chinese fields use GBK-compatible bytes.
 pub fn decode_ctp_text(value: &[c_char]) -> String {
-    let bytes = value
+    let length = value
         .iter()
-        .take_while(|&&byte| byte != 0)
-        .map(|&byte| byte as u8)
-        .collect::<Vec<_>>();
-    decode_ctp_bytes(&bytes)
+        .position(|&byte| byte == 0)
+        .unwrap_or(value.len());
+    // SAFETY: `c_char` is a one-byte C character type, and every initialized
+    // `c_char` value has a valid byte representation. The slice is borrowed
+    // from `value` and limited to its initialized, NUL-terminated prefix.
+    let bytes = unsafe { std::slice::from_raw_parts(value.as_ptr().cast::<u8>(), length) };
+    decode_ctp_bytes(bytes)
 }
 
 /// Decode strict UTF-8 first and GBK second. Malformed callback data uses
