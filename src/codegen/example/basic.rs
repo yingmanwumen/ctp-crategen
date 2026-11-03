@@ -139,7 +139,7 @@ enum Event {
 
 // Identifiers are ASCII C strings. Do not use this helper to assume ErrorMsg is UTF-8;
 // SDK business messages may use GBK. business_message() uses the decoded error.xml instead.
-fn text(value: &[std::ffi::c_char]) -> String { decode_ctp_text(value) }
+fn text(value: &[std::ffi::c_char]) -> String { decode_ctp_text(value).into_owned() }
 
 fn response_ok(
     sender: &Sender<Event>,

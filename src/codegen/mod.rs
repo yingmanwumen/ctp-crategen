@@ -479,7 +479,7 @@ fn c_string(value: &str) -> Result<Vec<c_char>, Error> {
         );
         rust += r#"
 /// Decode a CTP character buffer. Human-readable Chinese fields use GBK-compatible bytes.
-pub fn decode_ctp_text(value: &[c_char]) -> String {
+pub fn decode_ctp_text(value: &[c_char]) -> std::borrow::Cow<'_, str> {
     let length = value
         .iter()
         .position(|&byte| byte == 0)
@@ -494,32 +494,32 @@ pub fn decode_ctp_text(value: &[c_char]) -> String {
 /// Decode strict UTF-8 first and GBK second. Malformed callback data uses
 /// replacement characters as the final fallback because SPI callbacks cannot
 /// return a decoding error.
-pub fn decode_ctp_bytes(bytes: &[u8]) -> String {
+pub fn decode_ctp_bytes(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
     use encoding_rs::{GBK, UTF_8};
 
     if let Some(text) = UTF_8.decode_without_bom_handling_and_without_replacement(bytes) {
-        return text.into_owned();
+        return text;
     }
     if let Some(text) = GBK.decode_without_bom_handling_and_without_replacement(bytes) {
-        return text.into_owned();
+        return text;
     }
-    String::from_utf8_lossy(bytes).into_owned()
+    String::from_utf8_lossy(bytes).into_owned().into()
 }
 
 impl sys::CThostFtdcRspInfoField {
-    pub fn error_msg(&self) -> String { decode_ctp_text(&self.ErrorMsg) }
+    pub fn error_msg(&self) -> String { decode_ctp_text(&self.ErrorMsg).into_owned() }
 }
 impl sys::CThostFtdcExchangeOrderInsertErrorField {
-    pub fn error_msg(&self) -> String { decode_ctp_text(&self.ErrorMsg) }
+    pub fn error_msg(&self) -> String { decode_ctp_text(&self.ErrorMsg).into_owned() }
 }
 impl sys::CThostFtdcExchangeOrderActionErrorField {
-    pub fn error_msg(&self) -> String { decode_ctp_text(&self.ErrorMsg) }
+    pub fn error_msg(&self) -> String { decode_ctp_text(&self.ErrorMsg).into_owned() }
 }
 impl sys::CThostFtdcOrderField {
-    pub fn status_msg(&self) -> String { decode_ctp_text(&self.StatusMsg) }
+    pub fn status_msg(&self) -> String { decode_ctp_text(&self.StatusMsg).into_owned() }
 }
 impl sys::CThostFtdcOrderActionField {
-    pub fn status_msg(&self) -> String { decode_ctp_text(&self.StatusMsg) }
+    pub fn status_msg(&self) -> String { decode_ctp_text(&self.StatusMsg).into_owned() }
 }
 
 "#;
