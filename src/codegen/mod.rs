@@ -463,7 +463,7 @@ fn request_result(code: i32) -> Result<(), RequestError> {
     if code == 0 {
         Ok(())
     } else {
-        Err(RequestError { code })
+        Err(RequestError::from(code))
     }
 }
 
@@ -553,9 +553,26 @@ fn shared_object_soname(path: &Path) -> anyhow::Result<Option<String>> {
 const ERROR_SUPPORT: &str = r#"//! Errors from the Rust wrapper and immediate SDK request returns.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("CTP request returned {code}")]
-pub struct RequestError {
-    pub code: i32,
+pub enum RequestError {
+    #[error("网络连接失败")]
+    NetworkConnectionFailed,
+    #[error("未处理请求超过许可数")]
+    TooManyPendingRequests,
+    #[error("每秒发送请求超过许可数")]
+    RequestRateLimitExceeded,
+    #[error("未知请求错误：{0}")]
+    Unknown(i32),
+}
+
+impl From<i32> for RequestError {
+    fn from(code: i32) -> Self {
+        match code {
+            -1 => Self::NetworkConnectionFailed,
+            -2 => Self::TooManyPendingRequests,
+            -3 => Self::RequestRateLimitExceeded,
+            code => Self::Unknown(code),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
