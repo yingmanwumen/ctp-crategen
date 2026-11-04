@@ -12,9 +12,7 @@ use clang::{
 };
 
 use crate::{
-    codegen::model::{
-        Class, ErrorCode, Method, Param, RequestField, RequestFieldKind, RequestStruct,
-    },
+    codegen::model::{Class, DataField, DataStruct, ErrorCode, FieldKind, Method, Param},
     sdk::{HEADERS, Sdk},
 };
 
@@ -86,7 +84,8 @@ impl<'a> Parser<'a> {
     pub fn request_structs(
         &self,
         classes: &BTreeMap<&str, Class>,
-    ) -> anyhow::Result<Vec<RequestStruct>> {
+        data_structs: &BTreeMap<String, DataStruct>,
+    ) -> anyhow::Result<Vec<DataStruct>> {
         let mut pending = classes
             .values()
             .filter(|class| class.name.ends_with("Api"))
@@ -102,19 +101,39 @@ impl<'a> Parser<'a> {
             if !seen.insert(name.clone()) {
                 continue;
             }
-            let mut record = None;
-            self.tu.get_entity().visit_children(|entity, _| {
-                if entity.get_kind() == EntityKind::StructDecl
-                    && entity.get_name().as_deref() == Some(&name)
-                    && entity.is_definition()
+            let record = data_structs
+                .get(&name)
+                .with_context(|| format!("request struct not found: {name}"))?;
+            for field in &record.fields {
+                if let Some(nested) = field.rust_type.strip_prefix("sys::")
+                    && data_structs.contains_key(nested)
                 {
-                    record = Some(entity);
-                    EntityVisitResult::Break
-                } else {
-                    EntityVisitResult::Recurse
+                    pending.push(nested.to_owned());
                 }
-            });
-            let record = record.with_context(|| format!("request struct not found: {name}"))?;
+            }
+            structs.push(record.clone());
+        }
+        structs.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(structs)
+    }
+
+    /// Collect all SDK data structs, including response-only and unused records.
+    pub fn data_structs(&self) -> anyhow::Result<BTreeMap<String, DataStruct>> {
+        let mut records = BTreeMap::new();
+        self.tu.get_entity().visit_children(|entity, _| {
+            if entity.get_kind() == EntityKind::StructDecl
+                && entity.is_definition()
+                && let Some(name) = entity.get_name()
+                && name.starts_with("CThostFtdc")
+            {
+                records.insert(name, entity);
+                EntityVisitResult::Continue
+            } else {
+                EntityVisitResult::Recurse
+            }
+        });
+        let mut structs = BTreeMap::new();
+        for (name, record) in records {
             let length_fields = record
                 .get_children()
                 .into_iter()
@@ -132,16 +151,8 @@ impl<'a> Parser<'a> {
                 .into_iter()
                 .filter(|field| field.get_kind() == EntityKind::FieldDecl)
             {
-                let ty = field.get_type().context("request field missing type")?;
+                let ty = field.get_type().context("data field missing type")?;
                 let canonical = ty.get_canonical_type();
-                if canonical.get_kind() == TypeKind::Record {
-                    pending.push(
-                        canonical
-                            .get_declaration()
-                            .and_then(|decl| decl.get_name())
-                            .context("unnamed nested request struct")?,
-                    );
-                }
                 let typedef = ty.get_display_name();
                 let kind = if canonical.get_kind() == TypeKind::ConstantArray
                     && canonical.get_element_type().is_some_and(|element| {
@@ -149,15 +160,15 @@ impl<'a> Parser<'a> {
                     }) {
                     match typedef.as_str() {
                         "TThostFtdcCombOffsetFlagType" | "TThostFtdcCombHedgeFlagType" => {
-                            RequestFieldKind::CharacterCodeArray
+                            FieldKind::CharacterCodeArray
                         }
                         // These buffers may contain NUL bytes and use a separate length field.
                         "TThostFtdcClientSystemInfoType"
                         | "TThostFtdcAdditionalInfoType"
                         | "TThostFtdcCaptchaInfoType"
-                        | "TThostFtdcHandshakeDataType" => RequestFieldKind::Bytes,
-                        _ if typedef.starts_with("TThostFtdc") => RequestFieldKind::Text,
-                        _ => RequestFieldKind::Bytes,
+                        | "TThostFtdcHandshakeDataType" => FieldKind::Bytes,
+                        _ if typedef.starts_with("TThostFtdc") => FieldKind::Text,
+                        _ => FieldKind::Bytes,
                     }
                 } else if matches!(canonical.get_kind(), TypeKind::CharS | TypeKind::CharU)
                     && typedef.starts_with("TThostFtdc")
@@ -182,28 +193,29 @@ impl<'a> Parser<'a> {
                             })
                         })
                 {
-                    RequestFieldKind::CharacterCode
+                    FieldKind::CharacterCode
                 } else {
-                    RequestFieldKind::Value
+                    FieldKind::Value
                 };
-                let field_name = field.get_name().context("unnamed request field")?;
-                let length_field = if matches!(kind, RequestFieldKind::Bytes) {
+                let field_name = field.get_name().context("unnamed data field")?;
+                let length_field = if matches!(kind, FieldKind::Bytes) {
                     let candidate = format!("{field_name}Len");
                     length_fields.contains(&candidate).then_some(candidate)
                 } else {
                     None
                 };
-                fields.push(RequestField {
+                let rust_type = data_field_type(ty)
+                    .with_context(|| format!("unsupported field: {name}.{field_name}"))?;
+                fields.push(DataField {
                     name: field_name,
-                    rust_type: request_field_type(ty)?,
+                    rust_type,
                     kind,
                     length_field,
                     doc: field.get_comment(),
                 });
             }
-            structs.push(RequestStruct { name, fields });
+            structs.insert(name.clone(), DataStruct { name, fields });
         }
-        structs.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(structs)
     }
 
@@ -378,7 +390,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn request_field_type(ty: Type<'_>) -> anyhow::Result<String> {
+fn data_field_type(ty: Type<'_>) -> anyhow::Result<String> {
     if let Some(name) = ty.get_declaration().and_then(|decl| decl.get_name())
         && (name.starts_with("TThostFtdc")
             || name.starts_with("CThostFtdc")
@@ -410,7 +422,7 @@ fn request_field_type(ty: Type<'_>) -> anyhow::Result<String> {
         TypeKind::ConstantArray => {
             return Ok(format!(
                 "[{}; {}]",
-                request_field_type(
+                data_field_type(
                     canonical
                         .get_element_type()
                         .context("missing array element")?
@@ -418,10 +430,7 @@ fn request_field_type(ty: Type<'_>) -> anyhow::Result<String> {
                 canonical.get_size().context("missing array size")?
             ));
         }
-        _ => anyhow::bail!(
-            "unsupported request builder field type: {}",
-            ty.get_display_name()
-        ),
+        _ => anyhow::bail!("unsupported data field type: {}", ty.get_display_name()),
     };
     Ok(rust.to_owned())
 }

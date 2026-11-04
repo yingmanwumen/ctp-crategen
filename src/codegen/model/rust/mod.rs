@@ -1,6 +1,7 @@
 use heck::ToSnakeCase;
 
 mod error;
+mod formatting;
 mod request;
 mod spi;
 

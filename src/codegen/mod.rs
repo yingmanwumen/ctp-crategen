@@ -16,7 +16,7 @@ use goblin::Object;
 
 use crate::{
     codegen::{
-        model::{Class, ErrorCode, RequestStruct},
+        model::{Class, DataStruct, ErrorCode},
         parser::Parser,
     },
     sdk::{CLASSES, HEADERS, Sdk},
@@ -24,6 +24,12 @@ use crate::{
 
 const BRIDGE_CPP_NAME: &str = "ctp_brdige.cpp";
 const BRIDGE_HPP_NAME: &str = "ctp_brdige.hpp";
+
+struct ParsedSdk {
+    classes: BTreeMap<&'static str, Class>,
+    data_structs: BTreeMap<String, DataStruct>,
+    requests: Vec<DataStruct>,
+}
 
 /// Generates a standalone Rust crate from a validated CTP SDK.
 pub struct Codegen {
@@ -60,13 +66,17 @@ impl Codegen {
             None
         };
         self.copy_sdk(sdk)?;
-        let (classes, requests) = self.parse_classes(sdk)?;
+        let ParsedSdk {
+            classes,
+            data_structs,
+            requests,
+        } = self.parse_sdk(sdk)?;
         let (hpp, cpp) = self.cpp_bridge_codegen(&classes)?;
 
         Self::write_file(self.output_dir.join("vendor").join(BRIDGE_HPP_NAME), &hpp)?;
         Self::write_file(self.output_dir.join("vendor").join(BRIDGE_CPP_NAME), &cpp)?;
 
-        let rust_binding = self.rust_bindgen(sdk, &hpp)?;
+        let rust_binding = self.rust_bindgen(sdk, &hpp, &data_structs)?;
         let rust_sys = format!(
             r#"#![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 {}"#,
@@ -85,9 +95,17 @@ impl Codegen {
             &self.error_codegen(errors.as_deref()),
         )?;
         Self::write_file(self.output_dir.join("src").join("lib.rs"), &rust_lib)?;
+        let mut formatting = String::from(include_str!("formatting.rs"));
+        for record in data_structs.values() {
+            formatting += &record.rust_formatting_codegen();
+        }
+        Self::write_file(
+            self.output_dir.join("src").join("formatting.rs"),
+            &formatting,
+        )?;
         let mut builders = String::from(REQUEST_BUILDERS_SUPPORT);
         for request in &requests {
-            builders += &request.rust_codegen();
+            builders += &request.rust_request_codegen();
         }
         Self::write_file(self.output_dir.join("src").join("requests.rs"), &builders)?;
         Self::write_file(
@@ -297,10 +315,7 @@ thiserror = "2"
         Ok(())
     }
 
-    fn parse_classes(
-        &self,
-        sdk: &Sdk,
-    ) -> anyhow::Result<(BTreeMap<&str, Class>, Vec<RequestStruct>)> {
+    fn parse_sdk(&self, sdk: &Sdk) -> anyhow::Result<ParsedSdk> {
         let clang = Clang::new().map_err(|e| anyhow::anyhow!(e))?;
         let index = Index::new(&clang, false, false);
         let parser = Parser::new(sdk, &index)?;
@@ -309,8 +324,13 @@ thiserror = "2"
             .iter()
             .map(|&class_name| parser.parse(class_name).map(|res| (class_name, res)))
             .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
-        let requests = parser.request_structs(&classes)?;
-        Ok((classes, requests))
+        let data_structs = parser.data_structs()?;
+        let requests = parser.request_structs(&classes, &data_structs)?;
+        Ok(ParsedSdk {
+            classes,
+            data_structs,
+            requests,
+        })
     }
 
     /// Generate .hpp & .cpp
@@ -355,8 +375,13 @@ extern "C" {
         Ok((hpp, cpp))
     }
 
-    fn rust_bindgen(&self, sdk: &Sdk, wrapper_hpp: &str) -> anyhow::Result<Bindings> {
-        Ok(bindgen::Builder::default()
+    fn rust_bindgen(
+        &self,
+        sdk: &Sdk,
+        wrapper_hpp: &str,
+        data_structs: &BTreeMap<String, DataStruct>,
+    ) -> anyhow::Result<Bindings> {
+        let mut builder = bindgen::Builder::default()
             .derive_default(true)
             .clang_args(["-x", "c++"])
             .header_contents(
@@ -367,8 +392,11 @@ extern "C" {
                 "ThostFtdcUserApiDataType.h",
                 sdk.get_header("ThostFtdcUserApiDataType.h").unwrap(),
             )
-            .header_contents(BRIDGE_HPP_NAME, wrapper_hpp)
-            .generate()?)
+            .header_contents(BRIDGE_HPP_NAME, wrapper_hpp);
+        for name in data_structs.keys() {
+            builder = builder.no_debug(name);
+        }
+        Ok(builder.generate()?)
     }
 
     fn write_file(path: impl AsRef<Path>, content: &str) -> std::io::Result<()> {
@@ -431,6 +459,7 @@ impl BusinessErrorCode {{
             r#"pub mod sys;
 pub mod error;
 pub mod requests;
+mod formatting;
 pub use error::{Error, RequestError};
 pub use requests::*;
 

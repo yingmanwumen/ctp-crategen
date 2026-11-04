@@ -1,9 +1,9 @@
 use heck::ToSnakeCase;
 
-use crate::codegen::model::{RequestFieldKind, RequestStruct};
+use crate::codegen::model::{DataStruct, FieldKind};
 
-impl RequestStruct {
-    pub fn rust_codegen(&self) -> String {
+impl DataStruct {
+    pub fn rust_request_codegen(&self) -> String {
         let raw = &self.name;
         let name = raw.strip_prefix("CThostFtdc").unwrap_or(raw);
         let name = name.strip_suffix("Field").unwrap_or(name);
@@ -35,35 +35,35 @@ impl RequestStruct {
             let ty = &field.rust_type;
             let mut doc = field.doc.clone().unwrap_or_default();
             match field.kind {
-                RequestFieldKind::Text => doc.push_str("\n    /// Encodes the Rust string as GBK bytes with a trailing NUL. Interior NUL, encoding, and capacity errors are returned by `build()`."),
-                RequestFieldKind::CharacterCode => doc.push_str("\n    /// Accepts a bindgen character constant (`u8`) and stores its byte in `c_char`."),
-                RequestFieldKind::CharacterCodeArray => doc.push_str("\n    /// Sets the first flag and clears the remaining SDK array slots."),
-                RequestFieldKind::Bytes => {
+                FieldKind::Text => doc.push_str("\n    /// Encodes the Rust string as GBK bytes with a trailing NUL. Interior NUL, encoding, and capacity errors are returned by `build()`."),
+                FieldKind::CharacterCode => doc.push_str("\n    /// Accepts a bindgen character constant (`u8`) and stores its byte in `c_char`."),
+                FieldKind::CharacterCodeArray => doc.push_str("\n    /// Sets the first flag and clears the remaining SDK array slots."),
+                FieldKind::Bytes => {
                     doc.push_str("\n    /// Copies binary data without NUL termination. Capacity errors are returned by `build()`.");
                     if let Some(length) = &field.length_field {
                         doc += &format!("\n    /// Automatically sets `{length}` to the byte length.");
                     }
                 }
-                RequestFieldKind::Value => {},
+                FieldKind::Value => {},
             }
             let (ty, assignment) = match field.kind {
-                RequestFieldKind::Text => (
+                FieldKind::Text => (
                     "&str",
                     format!(
                         "if self.error.is_none() {{\n            self.error = write_text(&mut self.raw.{field_name}, value, \"{raw}.{field_name}\").err();\n        }}"
                     ),
                 ),
-                RequestFieldKind::CharacterCode => (
+                FieldKind::CharacterCode => (
                     "u8",
                     format!("self.raw.{field_name} = value as std::ffi::c_char;"),
                 ),
-                RequestFieldKind::CharacterCodeArray => (
+                FieldKind::CharacterCodeArray => (
                     "u8",
                     format!(
                         "self.raw.{field_name}.fill(0);\n        self.raw.{field_name}[0] = value as std::ffi::c_char;"
                     ),
                 ),
-                RequestFieldKind::Bytes => {
+                FieldKind::Bytes => {
                     let call = format!(
                         "write_bytes(&mut self.raw.{field_name}, value, \"{raw}.{field_name}\")"
                     );
@@ -78,7 +78,7 @@ impl RequestStruct {
                         format!("if self.error.is_none() {{\n            {conversion}\n        }}"),
                     )
                 }
-                RequestFieldKind::Value => (ty.as_str(), format!("self.raw.{field_name} = value;")),
+                FieldKind::Value => (ty.as_str(), format!("self.raw.{field_name} = value;")),
             };
             setters += &format!(
                 r#"

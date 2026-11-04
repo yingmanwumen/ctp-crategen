@@ -167,6 +167,27 @@ order_action.status_msg()
 
 回调对象本身仍然是 bindgen struct；调用者可以通过 `sys` 字段访问 CTP 的完整数据，也可以使用上述字符串 helper 读取文本。
 
+### Debug 和 Display
+
+所有 SDK 数据 struct 都提供自动生成的 `Debug` 和 `Display`，替代 bindgen 默认的 `Debug`：
+
+```rust
+println!("{order:?}");
+println!("{order:#?}");
+println!("{order}");
+```
+
+两者使用相同的字段格式，`{:#?}` 和 `{:#}` 使用多行格式：
+
+- 文本 buffer 按上述规则解码，显示为带引号的字符串；第一个 NUL 之后的内容不输出。
+- 字符状态码显示为字符，例如 `'0'`，而不是 `48`。
+- 组合标志数组显示为字符数组，保留每个 slot，包括 `\0`。
+- 二进制 buffer 显示为 `u8` 数组，保留内容中的 NUL；有有效长度字段时只输出有效数据。长度无效时输出完整 buffer，便于排查。
+- 数值和嵌套 struct 保持原有数据含义。
+
+格式化不改变字段类型或 FFI 布局。字符串中的控制字符会转义。
+**输出不会自动隐藏密码、AuthCode 等敏感字段，请勿将完整请求写入生产日志。**
+
 ## FFI 边界
 
 `sys` 模块是底层 FFI 层，保留：
