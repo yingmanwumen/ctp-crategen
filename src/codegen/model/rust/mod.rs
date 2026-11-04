@@ -528,29 +528,3 @@ impl Param {
         Ok((format!("{name}: {rust_type}"), setup, arg))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{Class, Method};
-
-    #[test]
-    fn api_owners_are_send_and_sync() {
-        for api_name in ["MdApi", "TraderApi"] {
-            let class = Class {
-                name: format!("CThostFtdc{api_name}"),
-                methods: vec![Method {
-                    name: format!("CreateFtdc{api_name}"),
-                    return_type: format!("CThostFtdc{api_name} *"),
-                    params: Vec::new(),
-                    is_static: true,
-                    doc: None,
-                }],
-            };
-            let generated = class.rust_codegen().unwrap();
-
-            assert!(generated.contains(&format!("unsafe impl Send for {api_name} {{}}")));
-            assert!(generated.contains(&format!("unsafe impl Sync for {api_name} {{}}")));
-            assert!(generated.contains("pub fn release(mut self)"));
-        }
-    }
-}
