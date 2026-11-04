@@ -582,15 +582,16 @@ fn shared_object_soname(path: &Path) -> anyhow::Result<Option<String>> {
 const ERROR_SUPPORT: &str = r#"//! Errors from the Rust wrapper and immediate SDK request returns.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[repr(i32)]
 pub enum RequestError {
-    #[error("网络连接失败")]
-    NetworkConnectionFailed,
-    #[error("未处理请求超过许可数")]
-    TooManyPendingRequests,
-    #[error("每秒发送请求超过许可数")]
-    RequestRateLimitExceeded,
     #[error("未知请求错误：{0}")]
     Unknown(i32),
+    #[error("网络连接失败")]
+    NetworkConnectionFailed = -1,
+    #[error("未处理请求超过许可数")]
+    TooManyPendingRequests = -2,
+    #[error("每秒发送请求超过许可数")]
+    RequestRateLimitExceeded = -3,
 }
 
 impl From<i32> for RequestError {
