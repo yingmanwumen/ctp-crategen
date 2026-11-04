@@ -305,12 +305,12 @@ impl MdSpi for MdHandler {
         _: i32,
         _: bool,
     ) {
-        if response_ok(&self.sender, "on_rsp_sub_market_data", info) {
-            if let Some(response) = response {
-                let _ = self
-                    .sender
-                    .send(Event::Subscribed(text(&response.InstrumentID)));
-            }
+        if response_ok(&self.sender, "on_rsp_sub_market_data", info)
+            && let Some(response) = response
+        {
+            let _ = self
+                .sender
+                .send(Event::Subscribed(text(&response.InstrumentID)));
         }
     }
 
@@ -530,48 +530,50 @@ fn main() -> Result<()> {
             }
         }
 
-        if let (Some(order), Some((lower, upper))) = (&config.order, quote) {
-            if trader_ready && md_ready && submitted_reference.is_none() {
-                if !lower.is_finite()
-                    || !upper.is_finite()
-                    || lower <= 0.0
-                    || upper < lower
-                    || order.price < lower
-                    || order.price > upper
-                {
-                    return Err("order price is outside the received daily price limits".into());
-                }
-                let request_id = request_ids.next()?;
-                let mut request = InputOrder::builder()
-                    .broker_id(&config.broker)
-                    .investor_id(&config.user)
-                    .user_id(&config.user)
-                    .instrument_id(&config.instrument)
-                    .exchange_id(&order.exchange)
-                    .order_ref(&next_reference)
-                    .direction(sys::THOST_FTDC_D_Buy)
-                    .order_price_type(sys::THOST_FTDC_OPT_LimitPrice)
-                    .comb_offset_flag(sys::THOST_FTDC_OF_Open)
-                    .limit_price(order.price)
-                    .volume_total_original(order.volume)
-                    .time_condition(sys::THOST_FTDC_TC_GFD)
-                    .volume_condition(sys::THOST_FTDC_VC_AV)
-                    .min_volume(1)
-                    .contingent_condition(sys::THOST_FTDC_CC_Immediately)
-                    .force_close_reason(sys::THOST_FTDC_FCC_NotForceClose)
-                    .is_auto_suspend(0)
-                    .user_force_close(0)
-                    .request_id(request_id)
-                    .build()?;
-                // Hedge flags default to speculation; the builder fills the SDK arrays internally.
-                // Exactly one attempt; no blind retry after a timeout or reconnect.
-                submitted_reference = Some(next_reference.clone());
-                trader.req_order_insert(&mut request, request_id)?;
-                println!(
-                    "BUY/OPEN submitted: ref={next_reference}, request ID: {request_id}, price={}, volume={}; this is not a fill confirmation",
-                    order.price, order.volume
-                );
+        if let (Some(order), Some((lower, upper))) = (&config.order, quote)
+            && trader_ready
+            && md_ready
+            && submitted_reference.is_none()
+        {
+            if !lower.is_finite()
+                || !upper.is_finite()
+                || lower <= 0.0
+                || upper < lower
+                || order.price < lower
+                || order.price > upper
+            {
+                return Err("order price is outside the received daily price limits".into());
             }
+            let request_id = request_ids.next()?;
+            let mut request = InputOrder::builder()
+                .broker_id(&config.broker)
+                .investor_id(&config.user)
+                .user_id(&config.user)
+                .instrument_id(&config.instrument)
+                .exchange_id(&order.exchange)
+                .order_ref(&next_reference)
+                .direction(sys::THOST_FTDC_D_Buy)
+                .order_price_type(sys::THOST_FTDC_OPT_LimitPrice)
+                .comb_offset_flag(sys::THOST_FTDC_OF_Open)
+                .limit_price(order.price)
+                .volume_total_original(order.volume)
+                .time_condition(sys::THOST_FTDC_TC_GFD)
+                .volume_condition(sys::THOST_FTDC_VC_AV)
+                .min_volume(1)
+                .contingent_condition(sys::THOST_FTDC_CC_Immediately)
+                .force_close_reason(sys::THOST_FTDC_FCC_NotForceClose)
+                .is_auto_suspend(0)
+                .user_force_close(0)
+                .request_id(request_id)
+                .build()?;
+            // Hedge flags default to speculation; the builder fills the SDK arrays internally.
+            // Exactly one attempt; no blind retry after a timeout or reconnect.
+            submitted_reference = Some(next_reference.clone());
+            trader.req_order_insert(&mut request, request_id)?;
+            println!(
+                "BUY/OPEN submitted: ref={next_reference}, request ID: {request_id}, price={}, volume={}; this is not a fill confirmation",
+                order.price, order.volume
+            );
         }
     }
 
