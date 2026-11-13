@@ -191,6 +191,7 @@ fn main() {
     let mut compiler = Command::new(env::var_os("CXX").unwrap_or_else(|| "c++".into()));
     compiler
         .args(["-std=c++11", "-fPIC", "-shared"])
+        .arg(cxx_optimization_flag())
         .arg(vendor.join("ctp_brdige.cpp"))
         .arg("-I")
         .arg(&vendor)
@@ -217,6 +218,18 @@ fn main() {
     println!("cargo:rustc-link-lib=dylib=ctp_bridge");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", out.display());
 
+}
+
+fn cxx_optimization_flag() -> &'static str {
+    match env::var("OPT_LEVEL").as_deref() {
+        Ok("0") => "-O0",
+        Ok("1") => "-O1",
+        Ok("2") => "-O2",
+        Ok("3") => "-O3",
+        Ok("s" | "z") => "-Os",
+        Ok(level) => panic!("unsupported Cargo OPT_LEVEL for C++ bridge: {level}"),
+        Err(error) => panic!("Cargo OPT_LEVEL is unavailable: {error}"),
+    }
 }
 
 fn stage_runtime_libraries(vendor: &Path, out: &Path) {

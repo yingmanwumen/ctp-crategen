@@ -33,6 +33,10 @@ SONAME 或创建软链接。替换 library 的其他依赖也需要放入 `vendo
 记录本机 SDK 目录的绝对路径；构建目录移动后，bridge 仍会从自身目录查找
 CTP library。
 
+生成的 C++ bridge 会读取 Cargo 的 `OPT_LEVEL`，并使用对应的 C++ 优化等级：
+debug 构建使用 `-O0`，release 构建使用 `-O3`，自定义 `opt-level` 也会同步到
+`-O1`、`-O2`、`-Os` 等参数。SDK 自带的预编译动态库不会被重新编译。
+
 上述动态库处理依赖 Linux ELF 的 SONAME 和 Unix symbolic link 机制，不能直接
 用于 Windows `.dll` 或 macOS `.dylib`。
 
